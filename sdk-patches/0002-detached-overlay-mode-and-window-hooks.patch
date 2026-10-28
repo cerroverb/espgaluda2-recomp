@@ -1,0 +1,384 @@
+# Backport to the SDOJ-bundled ReXGlue 0.8.0 of upstream rexglue-sdk commits 4b8069a
+# ("support detached overlay mode for apps with a custom renderer") and 7495132 ("add ReXApp
+# window event hooks"), github.com/rexglue/rexglue-sdk, BSD-3-Clause. Merged by hand where SDOJ
+# changed rex_app.cpp (its RefreshActiveState calls are kept). The close/minimize/restore hooks
+# of 7495132 are left out: 0.8.0's WindowListener has no such events.
+diff --git a/thirdparty/rexglue-sdk/include/rex/rex_app.h b/thirdparty/rexglue-sdk/include/rex/rex_app.h
+index e59dd03d..038591d5 100644
+--- a/thirdparty/rexglue-sdk/include/rex/rex_app.h
++++ b/thirdparty/rexglue-sdk/include/rex/rex_app.h
+@@ -161,6 +161,58 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+   /// Use for cleanup that depends on runtime resources.
+   virtual void OnGuestThreadExit(system::XThread* thread) { (void)thread; }
+ 
++  /// Detached overlay mode ("bring your own renderer"). Called once from
++  /// SetupPresentation when the SDK has no graphics backend
++  /// (config.graphics == nullptr, typically cleared in OnPreSetup) and the app
++  /// renders the guest itself. Return a unique_ptr to a ui::ImmediateDrawer
++  /// subclass that creates textures and submits via your renderer. ReXApp owns
++  /// the returned drawer (stored in immediate_drawer_, torn down after
++  /// imgui_drawer_).
++  ///
++  /// Construct the drawer presenter-less. REQUIRED CONTRACT: your CreateTexture
++  /// override MUST return nullptr (never crash or assert) when its GPU device
++  /// is not yet available, because the SDK uploads the ImGui font atlas lazily
++  /// on the first Draw and the device may only come up later (e.g. in the guest
++  /// D3D device-creation hook). NOTE: ImmediateDrawer::OnEnterPresenter() /
++  /// OnLeavePresenter() are NOT invoked in detached mode (the SDK never calls
++  /// SetPresenter with a non-null presenter on your drawer), so perform any
++  /// per-renderer GPU init lazily (on first CreateTexture/Begin), not in
++  /// OnEnterPresenter. You also own present timing / vsync / letterbox in this
++  /// mode.
++  ///
++  /// See ui::AppUIDrawContext for the per-frame draw-context handoff. Default:
++  /// no overlay (SDK presenter mode; this hook is never reached).
++  virtual std::unique_ptr<ui::ImmediateDrawer> OnCreateImmediateDrawer() { return nullptr; }
++
++  // --- Window event hooks (delivered on the UI thread) ---
++
++  /// Logical (DPI-independent) client size changed.
++  virtual void OnWindowResized(uint32_t logical_width, uint32_t logical_height) {
++    (void)logical_width;
++    (void)logical_height;
++  }
++
++  /// Physical pixel size changed. Use this to resize swap chains.
++  virtual void OnWindowPixelSizeChanged(uint32_t pixel_width, uint32_t pixel_height) {
++    (void)pixel_width;
++    (void)pixel_height;
++  }
++
++  /// The user asked to close the window (close button, Alt+F4). Return false
++  /// to veto and close later explicitly (window()->RequestClose()) after
++  /// stopping guest threads and draining renderers. Default accepts; the
++  /// window then closes and the app quits via the OnClosing path.
++  virtual bool OnWindowCloseRequested() { return true; }
++
++  virtual void OnWindowFocusChanged(bool focused) { (void)focused; }
++
++  /// Display scale changed (window moved to a monitor with different DPI).
++  /// scale is 1.0 at 96 DPI.
++  virtual void OnDpiScaleChanged(float scale) { (void)scale; }
++
++  virtual void OnWindowMinimized() {}
++  virtual void OnWindowRestored() {}
++
+   // --- Init phase methods (called in order from OnInitialize) ---
+ 
+   /// Resolve path defaults, load config TOML, initialize logging.
+@@ -206,6 +258,10 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+ 
+   // WindowListener overrides
+   void OnClosing(ui::UIEvent& e) override;
++  void OnResize(ui::UISetupEvent& e) override;
++  void OnDpiChanged(ui::UISetupEvent& e) override;
++  void OnGotFocus(ui::UISetupEvent& e) override;
++  void OnLostFocus(ui::UISetupEvent& e) override;
+ 
+   // WindowInputListener overrides
+   void OnKeyDown(ui::KeyEvent& e) override;
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/presenter.h b/thirdparty/rexglue-sdk/include/rex/ui/presenter.h
+index 8358f29c..e9c75c05 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/presenter.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/presenter.h
+@@ -60,7 +60,9 @@ class UIDrawContext {
+   UIDrawContext& operator=(const UIDrawContext& context) = delete;
+   virtual ~UIDrawContext() = default;
+ 
+-  Presenter& presenter() const { return presenter_; }
++  // The owning presenter, or null for app-driven (detached) contexts. Backend
++  // (presenter-driven) contexts always have one.
++  Presenter* presenter_or_null() const { return presenter_; }
+ 
+   // It's assumed that the render target size will be either equal to the size
+   // of the surface, or the render target will be stretched to cover the entire
+@@ -69,18 +71,36 @@ class UIDrawContext {
+   uint32_t render_target_height() const { return render_target_height_; }
+ 
+  protected:
++  // Presenter-driven ctor for backend (D3D12/Vulkan) contexts.
+   explicit UIDrawContext(Presenter& presenter, uint32_t render_target_width,
+                          uint32_t render_target_height)
+-      : presenter_(presenter),
++      : presenter_(&presenter),
++        render_target_width_(render_target_width),
++        render_target_height_(render_target_height) {}
++  // Presenter-less ctor for app-driven (detached) overlay contexts.
++  explicit UIDrawContext(uint32_t render_target_width, uint32_t render_target_height)
++      : presenter_(nullptr),
+         render_target_width_(render_target_width),
+         render_target_height_(render_target_height) {}
+ 
+  private:
+-  Presenter& presenter_;
++  Presenter* presenter_;  // null for app-driven (detached) contexts
+   uint32_t render_target_width_;
+   uint32_t render_target_height_;
+ };
+ 
++// Renderer-agnostic base for app-driven overlay rendering when the SDK runs
++// detached (config.graphics == nullptr). The app derives from this, adds its
++// own per-frame payload (e.g. the live command target and frame/submission
++// indices), constructs it each frame, hands it to ImGuiDrawer::Draw, and its
++// ImmediateDrawer pulls the payload out in Begin via static_cast<MyCtx&>(ctx).
++// Carries no presenter.
++class AppUIDrawContext : public UIDrawContext {
++ public:
++  AppUIDrawContext(uint32_t render_target_width, uint32_t render_target_height)
++      : UIDrawContext(render_target_width, render_target_height) {}
++};
++
+ struct RawImage {
+   uint32_t width = 0;
+   uint32_t height = 0;
+diff --git a/thirdparty/rexglue-sdk/src/ui/imgui_drawer.cpp b/thirdparty/rexglue-sdk/src/ui/imgui_drawer.cpp
+index 4af0aa1b..e6f474f0 100644
+--- a/thirdparty/rexglue-sdk/src/ui/imgui_drawer.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/imgui_drawer.cpp
+@@ -329,7 +329,6 @@ void ImGuiDrawer::SetPresenter(Presenter* new_presenter) {
+     if (!dialogs_.empty()) {
+       presenter_->RemoveUIDrawerFromUIThread(this);
+     }
+-    ImGuiIO& io = GetIO();
+   }
+   presenter_ = new_presenter;
+   if (presenter_) {
+@@ -348,20 +347,29 @@ void ImGuiDrawer::SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer) {
+     font_texture_.reset();
+   }
+   immediate_drawer_ = new_immediate_drawer;
+-  if (immediate_drawer_) {
++  // Eagerly upload the font atlas only when a presenter is attached (SDK mode).
++  // In detached mode (presenter_ == nullptr) the app's renderer device may not
++  // exist yet at SetupPresentation, so defer to the idempotent Draw-time
++  // SetupFontTexture().
++  if (immediate_drawer_ && presenter_) {
+     SetupFontTexture();
+   }
+ }
+ 
+ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
+-  // Drawing of anything is initiated by the presenter.
+-  assert_not_null(presenter_);
++  // Drawing is initiated by the presenter (SDK mode), or by the app in detached
++  // mode (config.graphics == nullptr), where there is no presenter.
+   if (!immediate_drawer_) {
+-    // A presenter has been attached, but an immediate drawer hasn't been
+-    // attached yet.
++    // A drawer target has been attached, but an immediate drawer hasn't yet.
+     return;
+   }
+ 
++  // In detached mode the app's immediate drawer (and the renderer device
++  // backing it) may only become usable on the first frame, after the guest
++  // creates its D3D device. Upload the font atlas lazily and idempotently;
++  // SetupFontTexture early-returns once font_texture_ is set.
++  SetupFontTexture();
++
+   if (dialogs_.empty()) {
+     return;
+   }
+@@ -412,8 +420,11 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
+   DetachIfLastDialogRemoved();
+ 
+   if (!dialogs_.empty()) {
+-    // Repaint (and handle input) continuously if still active.
+-    presenter_->RequestUIPaintFromUIThread();
++    // Repaint (and handle input) continuously if still active. In detached mode
++    // there is no presenter; the app drives repaint via its own present loop.
++    if (presenter_) {
++      presenter_->RequestUIPaintFromUIThread();
++    }
+   }
+ }
+ 
+diff --git a/thirdparty/rexglue-sdk/src/ui/immediate_drawer.cpp b/thirdparty/rexglue-sdk/src/ui/immediate_drawer.cpp
+index 9d7581ed..68b78d96 100644
+--- a/thirdparty/rexglue-sdk/src/ui/immediate_drawer.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/immediate_drawer.cpp
+@@ -37,7 +37,9 @@ void ImmediateDrawer::SetPresenter(Presenter* new_presenter) {
+ 
+ void ImmediateDrawer::Begin(UIDrawContext& ui_draw_context, float coordinate_space_width,
+                             float coordinate_space_height) {
+-  assert_true(&ui_draw_context.presenter() == presenter_);
++  // App-driven contexts carry no presenter; presenter-driven backend contexts
++  // must match the drawer's presenter. presenter_or_null() is safe for both.
++  assert_true(ui_draw_context.presenter_or_null() == presenter_);
+   ui_draw_context_ = &ui_draw_context;
+   // In case of non-positive values (or NaNs) - use render target coordinates
+   // according to the contract of the function, and also for safety because
+diff --git a/thirdparty/rexglue-sdk/src/ui/rex_app.cpp b/thirdparty/rexglue-sdk/src/ui/rex_app.cpp
+index 592bfc07..e87e6d3c 100644
+--- a/thirdparty/rexglue-sdk/src/ui/rex_app.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/rex_app.cpp
+@@ -1,6 +1,6 @@
+ /**
+  * @file        ui/rex_app.cpp
+- * @brief       ReXApp implementation — compiled as part of the consumer executable
++ * @brief       ReXApp implementation - compiled as part of the consumer executable
+  *
+  * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+  *              All rights reserved.
+@@ -305,60 +305,77 @@ bool ReXApp::SetupPresentation() {
+ 
+   auto* graphics_system = static_cast<rex::graphics::GraphicsSystem*>(config_.graphics.get());
+   if (graphics_system && graphics_system->presenter()) {
++    // SDK mode: the emulated-Xenos presenter drives the overlays.
+     auto* presenter = graphics_system->presenter();
+     auto* provider = graphics_system->provider();
+     if (provider) {
+       immediate_drawer_ = provider->CreateImmediateDrawer();
+       if (immediate_drawer_) {
+         immediate_drawer_->SetPresenter(presenter);
+-        imgui_drawer_ = std::make_unique<rex::ui::ImGuiDrawer>(
+-            window_.get(), 64, [this](ImFontAtlas* atlas) { OnConfigureFonts(atlas); });
+-        imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, immediate_drawer_.get());
+-        rex::ui::RegisterBind("bind_debug_overlay", "F3", "Toggle debug overlay", [this] {
+-          if (debug_overlay_) {
+-            debug_overlay_.reset();
+-          } else {
+-            debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(),
+-                                                                      frame_stats_provider_);
+-          }
+-          if (runtime_ && runtime_->input_system()) {
+-            static_cast<rex::input::InputSystem*>(runtime_->input_system())
+-                ->RefreshActiveState();
+-          }
+-        });
+-        rex::ui::RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] {
+-          if (console_overlay_) {
+-            console_overlay_.reset();
+-          } else {
+-            console_overlay_ = std::make_unique<ui::ConsoleDialog>(imgui_drawer_.get(), log_sink_);
+-          }
+-          if (runtime_ && runtime_->input_system()) {
+-            static_cast<rex::input::InputSystem*>(runtime_->input_system())
+-                ->RefreshActiveState();
+-          }
+-        });
+-        rex::ui::RegisterBind("bind_settings", "F4", "Toggle settings overlay", [this] {
+-          if (settings_overlay_) {
+-            settings_overlay_.reset();
+-          } else {
+-            settings_overlay_ =
+-                std::make_unique<ui::SettingsDialog>(imgui_drawer_.get(), config_path_);
+-          }
+-          if (runtime_ && runtime_->input_system()) {
+-            static_cast<rex::input::InputSystem*>(runtime_->input_system())
+-                ->RefreshActiveState();
+-          }
+-        });
+-
+-        OnCreateDialogs(imgui_drawer_.get());
++        SetupOverlays(presenter, immediate_drawer_.get());
+       }
+     }
+     window_->SetPresenter(presenter);
++  } else if (!graphics_system) {
++    // Detached mode: the app brings its own renderer and drives its own paint
++    // loop. ReXApp owns the returned drawer via immediate_drawer_.
++    immediate_drawer_ = OnCreateImmediateDrawer();
++    if (immediate_drawer_) {
++      SetupOverlays(/*presenter=*/nullptr, immediate_drawer_.get());
++      // No window_->SetPresenter, no drawer SetPresenter: the app owns the
++      // surface and the present cadence.
++    }
+   }
+ 
+   return true;
+ }
+ 
++void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDrawer* drawer) {
++  imgui_drawer_ = std::make_unique<rex::ui::ImGuiDrawer>(
++      window_.get(), 64, [this](ImFontAtlas* atlas) { OnConfigureFonts(atlas); });
++  // presenter is nullptr in detached mode; ImGuiDrawer tolerates that and the
++  // gated eager font upload in SetImmediateDrawer is skipped (font uploads
++  // lazily on the first Draw instead).
++  imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, drawer);
++  rex::ui::RegisterBind("bind_debug_overlay", "F3", "Toggle debug overlay", [this] {
++    if (debug_overlay_) {
++      debug_overlay_.reset();
++    } else {
++      debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(),
++                                                                frame_stats_provider_);
++    }
++    if (runtime_ && runtime_->input_system()) {
++      static_cast<rex::input::InputSystem*>(runtime_->input_system())
++          ->RefreshActiveState();
++    }
++  });
++  rex::ui::RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] {
++    if (console_overlay_) {
++      console_overlay_.reset();
++    } else {
++      console_overlay_ = std::make_unique<ui::ConsoleDialog>(imgui_drawer_.get(), log_sink_);
++    }
++    if (runtime_ && runtime_->input_system()) {
++      static_cast<rex::input::InputSystem*>(runtime_->input_system())
++          ->RefreshActiveState();
++    }
++  });
++  rex::ui::RegisterBind("bind_settings", "F4", "Toggle settings overlay", [this] {
++    if (settings_overlay_) {
++      settings_overlay_.reset();
++    } else {
++      settings_overlay_ =
++          std::make_unique<ui::SettingsDialog>(imgui_drawer_.get(), config_path_);
++    }
++    if (runtime_ && runtime_->input_system()) {
++      static_cast<rex::input::InputSystem*>(runtime_->input_system())
++          ->RefreshActiveState();
++    }
++  });
++
++  OnCreateDialogs(imgui_drawer_.get());
++}
++
+ void ReXApp::LaunchModule() {
+   app_context().CallInUIThreadDeferred([this]() {
+     OnPreLaunchModule();
+@@ -434,6 +451,33 @@ void ReXApp::OnClosing(ui::UIEvent& e) {
+   ShutdownFromUIThread();
+ }
+ 
++void ReXApp::OnResize(ui::UISetupEvent& e) {
++  (void)e;
++  if (!window_) {
++    return;
++  }
++  OnWindowPixelSizeChanged(window_->GetActualPhysicalWidth(), window_->GetActualPhysicalHeight());
++  OnWindowResized(window_->GetActualLogicalWidth(), window_->GetActualLogicalHeight());
++}
++
++void ReXApp::OnDpiChanged(ui::UISetupEvent& e) {
++  (void)e;
++  if (!window_) {
++    return;
++  }
++  OnDpiScaleChanged(float(window_->GetDpi()) / float(window_->GetMediumDpi()));
++}
++
++void ReXApp::OnGotFocus(ui::UISetupEvent& e) {
++  (void)e;
++  OnWindowFocusChanged(true);
++}
++
++void ReXApp::OnLostFocus(ui::UISetupEvent& e) {
++  (void)e;
++  OnWindowFocusChanged(false);
++}
++
+ void ReXApp::OnDestroy() {
+   // Notify subclass before cleanup
+   OnShutdown();
+@@ -452,6 +496,10 @@ void ReXApp::OnDestroy() {
+     imgui_drawer_->SetPresenterAndImmediateDrawer(nullptr, nullptr);
+     imgui_drawer_.reset();
+   }
++  // immediate_drawer_ was already unlinked from imgui_drawer_ above. Detach it
++  // from its presenter so SDK mode runs OnLeavePresenter() before disposal; in
++  // detached mode the drawer never had a presenter, so SetPresenter(nullptr) is
++  // a no-op.
+   if (immediate_drawer_) {
+     immediate_drawer_->SetPresenter(nullptr);
+     immediate_drawer_.reset();
