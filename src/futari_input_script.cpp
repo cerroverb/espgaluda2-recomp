@@ -1,0 +1,272 @@
+// Ported from github.com/ChanseyIsTheBest/futari-nx (pull request 2, commit 7f5a36a), app/src/futari_input_script.cpp. GPL-3.0 (LICENSE-GPL-3.0).
+// Scripted controller input (see futari_input_script.h).
+
+#include "futari_input_script.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <rex/cvar.h>
+#include <rex/input/input.h>
+#include <rex/input/input_driver.h>
+#include <rex/input/input_system.h>
+#include <rex/kernel/xboxkrnl/video.h>
+#include <rex/logging.h>
+#include <rex/runtime.h>
+
+REXCVAR_DEFINE_STRING(futari_input_script, "", "Espgaluda2",
+                      "Scripted pad for unattended runs: comma-separated <time>:<buttons> steps (seconds, or f<frame>; "
+                      "a range t0-t1 holds, a trailing * presses rapidly). Example: 12:start,15:a,17:a");
+
+namespace futari::input_script {
+namespace {
+
+using rex::input::X_INPUT_CAPABILITIES;
+using rex::input::X_INPUT_KEYSTROKE;
+using rex::input::X_INPUT_STATE;
+using rex::input::X_INPUT_VIBRATION;
+using rex::X_RESULT;
+using rex::X_STATUS;
+
+struct Button {
+  const char* name;
+  uint16_t mask;  // X_INPUT_GAMEPAD_*; 0 for the triggers
+  uint16_t vk;    // VK_PAD_*
+};
+
+constexpr Button kButtons[] = {
+    {"a", 0x1000, 0x5800},      {"b", 0x2000, 0x5801},     {"x", 0x4000, 0x5802},
+    {"y", 0x8000, 0x5803},      {"rb", 0x0200, 0x5804},    {"lb", 0x0100, 0x5805},
+    {"lt", 0, 0x5806},          {"rt", 0, 0x5807},         {"up", 0x0001, 0x5810},
+    {"down", 0x0002, 0x5811},   {"left", 0x0004, 0x5812},  {"right", 0x0008, 0x5813},
+    {"start", 0x0010, 0x5814},  {"back", 0x0020, 0x5815},  {"ls", 0x0040, 0x5816},
+    {"rs", 0x0080, 0x5817},
+};
+constexpr uint32_t kLeftTrigger = 1u << 16, kRightTrigger = 1u << 17;  // in the 32-bit step masks
+
+struct Step {
+  bool frames = false;  // times are presented frames, not seconds
+  double from = 0, to = 0;
+  bool rapid = false;
+  uint32_t buttons = 0;  // X_INPUT_GAMEPAD_* | kLeftTrigger | kRightTrigger
+  int player = 0;        // 0 = player 1, 1 = player 2
+};
+
+bool ParseTime(std::string text, bool& frames, double& out) {
+  frames = !text.empty() && (text[0] == 'f' || text[0] == 'F');
+  if (frames) {
+    text.erase(0, 1);
+  }
+  char* end = nullptr;
+  out = std::strtod(text.c_str(), &end);
+  return !text.empty() && end && *end == '\0' && out >= 0;
+}
+
+std::vector<Step> Parse(std::string script) {
+  std::erase(script, '"');
+  std::vector<Step> steps;
+  size_t pos = 0;
+  while (pos < script.size()) {
+    size_t next = script.find_first_of(",;", pos);
+    std::string item = script.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+    pos = next == std::string::npos ? script.size() : next + 1;
+    std::erase_if(item, [](unsigned char c) { return std::isspace(c); });
+    if (item.empty()) {
+      continue;
+    }
+    const size_t colon = item.find(':');
+    if (colon == std::string::npos) {
+      REXLOG_WARN("[input-script] step '{}' has no ':', ignored", item);
+      continue;
+    }
+    std::string when = item.substr(0, colon), what = item.substr(colon + 1);
+    Step step;
+    if (what.size() > 3 && (what[0] == 'p' || what[0] == 'P') && what[1] == '2' && what[2] == ':') {
+      step.player = 1;
+      what.erase(0, 3);
+    }
+    if (!what.empty() && what.back() == '*') {
+      step.rapid = true;
+      what.pop_back();
+    }
+    const size_t dash = when.find('-');
+    bool frames_from = false, frames_to = false;
+    bool ok = ParseTime(when.substr(0, dash), frames_from, step.from);
+    if (ok && dash != std::string::npos) {
+      ok = ParseTime(when.substr(dash + 1), frames_to, step.to) && frames_to == frames_from && step.to > step.from;
+    } else if (ok) {
+      // A single press lasts 150 ms (9 frames).
+      step.to = step.from + (frames_from ? 9 : 0.15);
+    }
+    step.frames = frames_from;
+    for (size_t b = 0; ok && b <= what.size();) {
+      size_t plus = what.find('+', b);
+      std::string name = what.substr(b, plus == std::string::npos ? std::string::npos : plus - b);
+      std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+      bool found = false;
+      for (const auto& button : kButtons) {
+        if (name == button.name) {
+          step.buttons |= name == "lt" ? kLeftTrigger : name == "rt" ? kRightTrigger : button.mask;
+          found = true;
+        }
+      }
+      ok = found;
+      b = plus == std::string::npos ? what.size() + 1 : plus + 1;
+    }
+    if (!ok || !step.buttons) {
+      REXLOG_WARN("[input-script] step '{}' not understood, ignored", item);
+      continue;
+    }
+    steps.push_back(step);
+  }
+  return steps;
+}
+
+class ScriptedInputDriver final : public rex::input::InputDriver {
+ public:
+  explicit ScriptedInputDriver(std::vector<Step> steps)
+      : InputDriver(nullptr, 0), steps_(std::move(steps)), start_(std::chrono::steady_clock::now()) {
+    two_players_ = std::any_of(steps_.begin(), steps_.end(), [](const Step& s) { return s.player == 1; });
+  }
+
+  X_STATUS Setup() override { return X_STATUS_SUCCESS; }
+
+  // espgaluda2-recomp: ReXGlue 0.8.0's InputDriver is per user, not per device (futari-nx's SDK 0.10.0): the
+  // scripted pad is user 0, and user 1 when the script has player 2 steps.
+  int PlayerOf(uint32_t user_index) const {
+    return user_index == 0 ? 0 : (user_index == 1 && two_players_) ? 1 : -1;
+  }
+
+  X_RESULT GetState(uint32_t user_index, X_INPUT_STATE* out_state) override {
+    const int player = PlayerOf(user_index);
+    if (player < 0) {
+      return X_ERROR_DEVICE_NOT_CONNECTED;
+    }
+    std::lock_guard lock(mutex_);
+    const uint32_t buttons = Update(player);
+    if (out_state) {
+      std::memset(out_state, 0, sizeof(*out_state));
+      out_state->packet_number = packet_[player];
+      out_state->gamepad.buttons = uint16_t(buttons & 0xFFFF);
+      out_state->gamepad.left_trigger = buttons & kLeftTrigger ? 0xFF : 0;
+      out_state->gamepad.right_trigger = buttons & kRightTrigger ? 0xFF : 0;
+    }
+    return X_ERROR_SUCCESS;
+  }
+
+  X_RESULT GetCapabilities(uint32_t user_index, uint32_t, X_INPUT_CAPABILITIES* out_caps) override {
+    if (PlayerOf(user_index) < 0) {
+      return X_ERROR_DEVICE_NOT_CONNECTED;
+    }
+    if (out_caps) {
+      std::memset(out_caps, 0, sizeof(*out_caps));
+      out_caps->type = 0x01;      // XINPUT_DEVTYPE_GAMEPAD
+      out_caps->sub_type = 0x01;  // XINPUT_DEVSUBTYPE_GAMEPAD
+      out_caps->gamepad.buttons = 0xFFFF;
+      out_caps->gamepad.left_trigger = 0xFF;
+      out_caps->gamepad.right_trigger = 0xFF;
+    }
+    return X_ERROR_SUCCESS;
+  }
+
+  X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION*) override {
+    return PlayerOf(user_index) >= 0 ? X_ERROR_SUCCESS : X_ERROR_DEVICE_NOT_CONNECTED;
+  }
+
+  X_RESULT GetKeystroke(uint32_t user_index, uint32_t, X_INPUT_KEYSTROKE* out_keystroke) override {
+    const int player = PlayerOf(user_index);
+    if (player < 0) {
+      return X_ERROR_DEVICE_NOT_CONNECTED;
+    }
+    std::lock_guard lock(mutex_);
+    Update(player);
+    auto& queue = keystrokes_[player];
+    if (queue.empty()) {
+      return X_ERROR_EMPTY;
+    }
+    if (out_keystroke) {
+      *out_keystroke = queue.front();
+    }
+    queue.pop();
+    return X_ERROR_SUCCESS;
+  }
+
+ private:
+  // Buttons held now; queues a keystroke for every change since the last call and logs it.
+  uint32_t Update(int player) {
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
+    const double frames = double(rex::kernel::xboxkrnl::GuestSwapCount());
+    uint32_t buttons = 0;
+    for (const auto& step : steps_) {
+      if (step.player != player) {
+        continue;
+      }
+      const double now = step.frames ? frames : seconds;
+      if (now < step.from || now >= step.to) {
+        continue;
+      }
+      if (step.rapid && std::fmod(now - step.from, step.frames ? 6.0 : 0.1) >= (step.frames ? 3.0 : 0.05)) {
+        continue;
+      }
+      buttons |= step.buttons;
+    }
+    const uint32_t changed = buttons ^ held_[player];
+    if (changed) {
+      ++packet_[player];
+      for (const auto& button : kButtons) {
+        const uint32_t bit = std::string_view(button.name) == "lt"   ? kLeftTrigger
+                             : std::string_view(button.name) == "rt" ? kRightTrigger
+                                                                     : button.mask;
+        if (!(changed & bit)) {
+          continue;
+        }
+        X_INPUT_KEYSTROKE ks = {};
+        ks.virtual_key = button.vk;
+        ks.flags = (buttons & bit) ? rex::input::X_INPUT_KEYSTROKE_KEYDOWN : rex::input::X_INPUT_KEYSTROKE_KEYUP;
+        keystrokes_[player].push(ks);
+        if (buttons & bit) {
+          REXLOG_INFO("[input-script] {:.2f} s, frame {}: {}{} down", seconds, uint64_t(frames),
+                      player ? "p2 " : "", button.name);
+        }
+      }
+      held_[player] = buttons;
+    }
+    return buttons;
+  }
+
+  const std::vector<Step> steps_;
+  const std::chrono::steady_clock::time_point start_;
+  std::mutex mutex_;
+  bool two_players_ = false;
+  uint32_t held_[2] = {};
+  uint32_t packet_[2] = {};
+  std::queue<X_INPUT_KEYSTROKE> keystrokes_[2];
+};
+
+}  // namespace
+
+void Install(rex::Runtime* runtime) {
+  auto* input = runtime ? static_cast<rex::input::InputSystem*>(runtime->input_system()) : nullptr;
+  std::string script = REXCVAR_GET(futari_input_script);
+  if (!input || script.empty()) {
+    return;
+  }
+  auto steps = Parse(script);
+  if (steps.empty()) {
+    return;
+  }
+  REXLOG_INFO("[input-script] {} step(s): {}", steps.size(), script);
+  input->AddDriver(std::make_unique<ScriptedInputDriver>(std::move(steps)));
+}
+
+}  // namespace futari::input_script

@@ -13,13 +13,14 @@
 #include "renut_engine/gpu/banjo_renut_deko3d.h"  // futari-nx (peggle2-nx): MissingGameShaders
 #endif
 
-REXCVAR_DEFINE_STRING(futari_renderer, "default", "Futari",
-                      "Renderer, chosen at boot. default = Futari's own (futari_renderer_native chooses the native "
-                      "PM4-ring renderer or the emulated Xenos GPU). renut = Renut's Direct3D-level renderer "
-                      "(github.com/masterspike52/reNut, by reNut and masterspike52, through banjo-nx): Futari's "
-                      "Direct3D runs natively through plume (Vulkan on the PC, deko3d on the Switch), with no PM4 ring "
-                      "and no EDRAM model; its own renut_* keys apply")
-    .allowed({"default", "renut"})
+// espgaluda2-recomp: the choice is espgaluda2_renderer (futari-nx's futari_renderer, with "xenos" for the SDK's
+// emulated Xenos GPU, the only other renderer this project has).
+REXCVAR_DEFINE_STRING(espgaluda2_renderer, "xenos", "Espgaluda2",
+                      "Renderer, chosen at boot. xenos = the SDK's emulated Xenos GPU (PM4 command stream, EDRAM, "
+                      "runtime shader translation). renut = Renut's Direct3D-level renderer "
+                      "(github.com/masterspike52/reNut by reNut and masterspike52, through banjo-nx and futari-nx): the "
+                      "game's Direct3D runs natively through plume on Vulkan, with no PM4 ring and no EDRAM model")
+    .allowed({"xenos", "renut"})
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace banjo::renut_gpu {
@@ -28,7 +29,7 @@ namespace detail {
 int8_t g_active = 0;
 bool LatchActive() {
   static const bool active = [] {
-    const bool renut = REXCVAR_GET(futari_renderer) == "renut";
+    const bool renut = REXCVAR_GET(espgaluda2_renderer) == "renut";
 #if defined(PLUME_DEKO3D)
     // futari-nx (2026-10-20, peggle2-nx's): a build without translated game shaders (FUTARI_RENUT_RELEASE_SHADERS)
     // takes them from the web installer's deko3d_glsl.bin beside the NRO; without it nothing of the game is drawn.

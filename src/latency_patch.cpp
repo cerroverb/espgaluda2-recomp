@@ -16,6 +16,8 @@
 
 #include <rex/cvar.h>
 
+#include "renut_engine/futari_renut_yield.h"
+
 REXCVAR_DEFINE_BOOL(latency_patch, true, "Espgaluda2",
                     "Wait for each frame's GPU fence in Swap (cuts about one frame of input lag)");
 
@@ -30,6 +32,9 @@ extern "C" REX_FUNC(__imp__sub_82170CE0);
 extern "C" REX_FUNC(sub_82173AE8);
 
 extern "C" REX_FUNC(sub_82170CE0) {
+  // With Renut's renderer (--espgaluda2_renderer=renut) its own Swap replaces this one, latency patch included
+  // (futari-nx's FUTARI_RENUT_YIELD; tools/renut_hooks.py leaves this address to this hook).
+  FUTARI_RENUT_YIELD(D3DDevice_Swap)
   const uint32_t device = ctx.r3.u32;
   __imp__sub_82170CE0(ctx, base);
 
