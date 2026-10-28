@@ -27,6 +27,14 @@ FetchContent_Declare(futari_nx
     PATCH_COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/renut-patches -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patches.cmake
     SOURCE_SUBDIR _unused)
 FetchContent_MakeAvailable(futari_nx)
+# FetchContent runs its patch step only when it populates the tree; a tree fetched before a patch was added keeps
+# missing it. The patch script skips patches already applied, so it runs on every configure too.
+execute_process(COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/renut-patches
+                        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patches.cmake
+                WORKING_DIRECTORY "${futari_nx_SOURCE_DIR}" RESULT_VARIABLE _patch_result)
+if(NOT _patch_result EQUAL 0)
+    message(FATAL_ERROR "Applying renut-patches failed")
+endif()
 set(RENUT_THIRDPARTY_DIR "${futari_nx_SOURCE_DIR}/app/thirdparty")
 
 # The shader containers the shader cache is built from (tools/renut_dump_shaders.py's dump of the loaded default.xex

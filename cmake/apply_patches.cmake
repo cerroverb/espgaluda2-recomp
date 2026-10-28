@@ -11,6 +11,14 @@ foreach(_patch IN LISTS PATCHES)
         message(STATUS "already applied: ${_patch}")
         continue()
     endif()
+    execute_process(COMMAND git apply --check --whitespace=nowarn "${_patch}"
+                    RESULT_VARIABLE _applies OUTPUT_QUIET ERROR_QUIET)
+    if(NOT _applies EQUAL 0)
+        # Applies neither way: applied earlier and overlapped by a later patch of the same files (0001 and 0005 both
+        # change graphics_system.cpp), so its reverse no longer matches either.
+        message(STATUS "applied earlier (a later patch overlaps it): ${_patch}")
+        continue()
+    endif()
     execute_process(COMMAND git apply --whitespace=nowarn "${_patch}" RESULT_VARIABLE _result)
     if(NOT _result EQUAL 0)
         message(FATAL_ERROR "git apply failed: ${_patch}")
