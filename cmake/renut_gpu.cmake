@@ -24,7 +24,7 @@ FetchContent_Declare(futari_nx
     GIT_TAG 32a896478b0f6c66f9b2fa7dcc88a2d54e785659
     GIT_PROGRESS TRUE
     UPDATE_DISCONNECTED TRUE
-    PATCH_COMMAND git apply --whitespace=nowarn ${_renut_patches}
+    PATCH_COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/renut-patches -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patches.cmake
     SOURCE_SUBDIR _unused)
 FetchContent_MakeAvailable(futari_nx)
 set(RENUT_THIRDPARTY_DIR "${futari_nx_SOURCE_DIR}/app/thirdparty")
@@ -59,6 +59,9 @@ if(TARGET o1heap AND NOT TARGET rex::o1heap)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/src/renut_engine/gpu/gpu.cmake")
+# plume's copy of volk under its own names (renut-patches/0002): ReXGlue 0.8.0 links its volk statically into the same
+# executable. PUBLIC, so the renderer's own Vulkan calls name plume's pointers too.
+target_compile_definitions(plume PUBLIC PLUME_RENAME_VOLK)
 
 add_library(espgaluda2_renut_gpu OBJECT
     "${CMAKE_CURRENT_SOURCE_DIR}/src/renut_engine/gpu/banjo_renut_select.cpp"

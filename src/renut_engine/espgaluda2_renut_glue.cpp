@@ -31,3 +31,7 @@ REXCVAR_DEFINE_INT32(futari_vblank_phase_max_us, 9000, "Espgaluda2/Renut",
 REXCVAR_DEFINE_BOOL(futari_late_input, false, "Espgaluda2/Renut",
                     "futari-nx's own late input (not in this project; keep false so Renut's applies)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
+// From app/src/me/me_pc_stubs.cpp: the Switch console profiler's counter, a no-op off the Switch
+// (perf/frame_stats.cpp counts presented frames with it).
+extern "C" void RexSwitchPerfCount(unsigned) {}
