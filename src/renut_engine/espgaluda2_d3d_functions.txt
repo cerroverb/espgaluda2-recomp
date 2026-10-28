@@ -1,0 +1,79 @@
+# Espgaluda II's Direct3D functions (XDK 2.0.9328) for Renut's renderer: <Renut name> <default.xex address> <how>.
+# tools/renut_hooks.py reads it. Format as futari-nx's app/src/renut_engine/futari_d3d_functions.txt (PR 2, 7f5a36a).
+# Every address was confirmed against the generated code; the full evidence per line is in docs/d3d/map_A.txt,
+# docs/d3d/map_B.txt and WORKLOG.md ("Direct3D function addresses"). Futari's names that are absent here are listed
+# at the end with the reason.
+D3D_SetSurfaceClip                     8215F9C8  map_A: tail target of CleanupGprAllocationSetup, called by SetScissorRect; reads RTs +0x3148
+D3DDevice_SetScissorRect               82161F80  map_A: viewport +0x3218, scissor +0x3234, scissor test +0x2F00
+D3DDevice_SetStreamSource              82162078  WORKLOG: VB at (3159+stream)*4, stride byte +0x31A0+stream
+D3DDevice_GetStreamSource              82162198  WORKLOG: reads VB slot and stride byte, AddRef, writes both out
+D3DDevice_SetIndices                   82162220  WORKLOG: stores +0x3144 with the fence-tag release
+D3D_ResetAllState                      82162568  WORKLOG: object at delta 0xC8F20 (exact sizes); Swap's last call; calls KickOff, SetScreenExtentQueryMode
+D3D_SetViewport                        82162660  WORKLOG: delta 0xC8F20 object, size 0x268; called by SetViewport / SetViewportF
+D3DDevice_SetViewport                  821628C8  WORKLOG: delta 0xC8F20 object, size 0xA0, calls D3D_SetViewport
+D3D_SetSurfaceInfo                     82162968  WORKLOG: delta 0xC8F20 object, size 0x90, called by SetRenderTarget / SetDepthStencilSurface
+D3DDevice_SetRenderTarget              821629F8  WORKLOG: delta 0xC8F20 object, size 0x350 = futari's; RTs +0x3148, tiling surfaces +0x3268; UnsetAll calls it
+D3DDevice_SetDepthStencilSurface       82162D48  WORKLOG: follows SetRenderTarget (0x350); depth +0x3158; UnsetAll calls it with 0
+D3D_CleanupGprAllocationSetup          82167DD8  map_A: only caller SetShaderGPRAllocation; dirty bits as reNut's native version
+XGRegisterPixelShader                  821682C0  WORKLOG: delta 0xCD778 object, exact size 0x38
+D3DDevice_SetPixelShader               821682F8  WORKLOG: delta 0xCD778 object, exact size 0x1C0; PS at +0x3244
+D3DDevice_SetVertexShader              821684B8  WORKLOG: delta 0xCD778 object, exact size 0x1D0; VS at +0x3248
+D3DDevice_SetVertexDeclaration         82168688  map_A: stw r4,+0x2ED8; UnsetAll calls it
+D3DDevice_CreateVertexDeclaration      82168790  WORKLOG: delta 0xCD778 object, exact size 0x80
+D3DDevice_SetShaderGPRAllocation       82168810  map_A: +0x2AA8 packing as reNut kGprAllocation
+D3DDevice_CreatePixelShader            82169D88  map_A: copies container, calls XGRegisterPixelShader
+XGRegisterVertexShader                 82169E78  map_A: 872-byte header, type 6
+D3DDevice_CreateVertexShader           82169F70  map_A: copies container, calls XGRegisterVertexShader
+D3D_GetTextureDimensions               82163028  map_A: texture header +0x24/+0x28/+0x30 decode
+D3D_GetGpuTextureDimensions            821630C0  map_A: same decode from a fetch constant
+D3DSurface_UnlockRect                  82163160  map_A: UnlockResource(parent, ...) tail call, size 0x18
+D3D_BlockSizeOfGpuFormat               821631E8  map_A: same format/block-size table as reNut
+D3D_GetMaxMipLevels                    82163280  map_A: body as reNut's; called by SetTextureHeader
+D3D_AlignTextureDimensions             82163308  map_A: exact futari spacing in the texture-helper object
+D3D_FindTextureSize                    82163428  map_A: exact size 0x370; reads the format table
+D3D_GetMipTailLevelOffsetCoords        82163798  map_A: follows FindTextureSize as in futari
+D3D_LockSurface                        821642A8  map_A: only caller Lock2DSurface, reNut's argument order
+D3D_Lock2DSurface                      82164380  map_A: Surface_LockRect's tail target, reNut's argument order
+D3D_SetTextureHeader                   82164410  map_A: called by CreateTexture with reNut's argument order
+D3DDevice_CreateTexture                82164A38  map_A: 8 args, 0x34 header, calls SetTextureHeader
+D3DDevice_CreateSurface                82164B58  map_A: 48-byte header, SetSurfaceHeader, 0x100000 flag
+D3DSurface_LockRect                    82164C90  map_A: tail-calls Lock2DSurface with reNut's order
+D3DDevice_SetTexture                   82164CB8  map_A: textures at +0x31B0; UnsetAll calls it
+D3DDevice_ClearF                       82165FF8  map_B: called by Clear with reNut's ClearF arguments
+D3DDevice_Clear                        82166120  map_B: (count, rects, flags, color, Z, stencil)
+D3DDevice_DrawIndexedVertices          821661E0  map_A: (prim, base_vertex, start_index, index_count); index buffer +0x3144. Not in futari's list: Espgaluda's draw path
+D3DDevice_Resolve                      8216DAF8  map_B: 961 instructions, size 0xF08 = futari's
+D3DResource_GetType                    8216EA00  map_B: low nibble of Common, type 3/4 cases
+D3D_UnlockResource                     8216EA90  map_A: common tail target of the Unlock functions
+D3DResource_AddRef                     8216ECF8  map_B: atomic +1 of +4, parent AddRef for levels
+D3DVertexBuffer_Unlock                 8216EF60  map_A: UnlockResource(buffer, +0x18, 0) tail call
+D3DDevice_EndExport                    8216F558  map_B: clears +0x2898+4*index (reNut kExportAddress)
+D3DResource_Destroy                    8216F7B8  map_B: Release's destroy at count 0; per-type teardown
+D3DResource_Release                    8216FD20  map_B: atomic -1, parent release, then Destroy
+D3DDevice_AddRef                       8216FF30  map_B: device +0x3C += 1 as reNut's hook. Not in futari's list
+D3D_CBlocker_Check                     8216FF48  map_B: polled in CDevice_BlockOnFence's wait loop (8216FE68 is the destructor)
+D3DDevice_Release                      82170070  map_B: refcount +0x3C; Uninitialize then XMemFree at 1
+D3DDevice_UnsetAll                     821700C8  map_B: unsets RTs, depth, shaders, decl, indices, streams, textures
+Direct3D_CreateDevice                  821703F8  map_B: allocates 0x5F00, type-2 flag, behaviour flags
+D3D_SynchronizeToPresentationInterval  821708B0  map_B: WAIT_REG_MEM packet; delta 0xCB8D8
+D3DDevice_Swap                         82170CE0  WORKLOG: delta 0xCB8D8; +0x4180 swap count, +0x3B2C present fence (src/latency_patch.cpp yields)
+D3DDevice_Present                      82171340  map_B: viewport +0x3218 copy, then Swap path. Not in futari's list; has a game caller
+D3DDevice_GetDeviceCaps                82171478  map_B: copies 304 bytes from 0x82036E40 (82171440 copies 1104: not it)
+D3DDevice_SetScreenExtentQueryMode     82171490  map_B: rlwimi into +10916 bits 18-19; delta 0xCB8C8
+D3D_RingBufferDeviceAllocate           821737D0  map_B: delta 0xCB8C8 run of 10, every spacing exact
+D3D_CDevice_AllocateInlineData         82173A00  map_B: delta 0xCB8C8 run; inline allocator fields +15124..+15143
+D3D_CDevice_BlockOnFence               82173AE8  WORKLOG: delta 0xCB8C8; completion +10896, tag +10908
+D3DDevice_BlockOnFence                 82173BB8  map_B: delta 0xCB8C8 run; calls CDevice_BlockOnFence with the global device
+D3D_CDevice_KickOffSegment             82174700  map_B: delta 0xCB8C8 run; +0x350C/+0x3510
+D3D_CDevice_KickOff                    82174888  map_B: delta 0xCB8C8 run; in-KickOff +0x3460, 57 callers
+D3DDevice_IsFencePending               821749C0  map_B: delta 0xCB8C8 run; completion and tag
+D3D_CDevice_BeginRingBig               82174AB8  map_B: delta 0xCB8C8 run; write pointer/limit +48/+52
+D3DDevice_SetRingBufferParameters      82174BA8  map_B: delta 0xCB8C8 run end; ring fields +15104..+15144
+D3DDevice_SetPredication               82179580  map_B: +0x325C and the tiling bit of +10940
+# In futari's list but not in Espgaluda II's default.xex (docs/d3d/map_A.txt has the reasons):
+# D3DArrayTexture_UnlockRect, D3D_Lock3DSurface, D3DLineTexture_LockRect, D3DVolume_LockBox, D3DVolume_GetDesc,
+# D3DSurface_GetDesc, D3DBaseTexture_GetLevelCount (no array/volume/line textures linked); D3DDevice_BeginVertices,
+# D3DDevice_EndIndexedVertices, D3DDevice_DrawVerticesUP (nothing uses device +0x3554); D3DVertexShader_Bind (no public
+# Bind; fetch patching is inside the draw flush).
+# Confirmed but left to the original, as futari-nx does: D3D_InitializeApiState 82178988 and D3D_CDevice_Uninitialize
+# 821793E0 (only reached through CreateDevice / Release, which the renderer replaces).

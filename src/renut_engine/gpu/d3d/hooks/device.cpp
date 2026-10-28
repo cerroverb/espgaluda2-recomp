@@ -74,7 +74,7 @@ using namespace renut::gpu;
 
 // Kernel exports the device code uses.
 // futari-nx: the game's GetCurrentThreadId is Futari's sub_8208DA10 (CreateDevice's sub_820AB668 stores it at +10888).
-REX_IMPORT(__imp__sub_8208DA10, GuestGetCurrentThreadId, u32());
+REX_IMPORT(__imp__sub_8215F418, GuestGetCurrentThreadId, u32());  // espgaluda2-recomp: Futari sub_8208DA10; map_B
 REX_IMPORT(__imp__RtlInitializeCriticalSection, RtlInitializeCriticalSection, void(u32));
 REX_IMPORT(__imp__KeQueryPerformanceFrequency, KeQueryPerformanceFrequency, u32());
 REX_IMPORT(__imp__KeGetCurrentProcessType, KeGetCurrentProcessType, u32());
@@ -115,7 +115,7 @@ constexpr u32 kDeviceOffsetsMinusOne[] = {21768, 21772, 15144};
 constexpr u32 kDeviceTypeNoHardware = 2;
 // Copied from the global qword at 0x82F39B38 into every device.
 constexpr u32 kDeviceOffsetGlobalQword = 10880;
-constexpr u32 kGlobalQwordVa = 0x821E1AF8;
+constexpr u32 kGlobalQwordVa = 0x82911888;  // espgaluda2-recomp: Futari 0x821E1AF8; docs/d3d/map_B.txt (sub_82179088)
 // Hardware-path fields: two critical sections, QueryPerformanceFrequency and
 // its reciprocal as floats, and 41 words set to -1.
 constexpr u32 kDeviceOffsetCriticalSection0 = 15152;
@@ -123,7 +123,7 @@ constexpr u32 kDeviceOffsetCriticalSection1 = 15180;
 constexpr u32 kDeviceOffsetPerfFrequency = 21796;
 constexpr u32 kDeviceOffsetTitleMinusOne = 23592;
 // Import slot holding the address of the kernel's VdGlobalDevice variable.
-constexpr u32 kVdGlobalDeviceImportSlot = 0x820005F8;
+constexpr u32 kVdGlobalDeviceImportSlot = 0x82000620;  // espgaluda2-recomp: Futari 0x820005F8; map_B (xboxkrnl ordinal 0x1BE)
 
 constexpr u32 kE_OUTOFMEMORY = 0x8007000Eu;
 
@@ -973,7 +973,7 @@ constexpr u32 kDeviceOffsetReferenceCount = 0x3C;
 constexpr u32 kDeviceOffsetOwnerThread = 0x2A88;
 // futari-nx: Futari's constant D3DCAPS9 is at 0x82003800 (sub_820A5B80 copies its 304 bytes; N&B's 0x82183B00), and
 // Futari has no D3D::IsFusion (its hook is not placed: 0 never reads).
-constexpr u32 kDeviceCapsVa = 0x82003800;  // N&B's constant D3DCAPS9
+constexpr u32 kDeviceCapsVa = 0x82036E40;  // espgaluda2-recomp: Futari 0x82003800; map_B (GetDeviceCaps 82171478) (N&B's constant D3DCAPS9)
 constexpr u32 kDeviceCapsSize = 0x130;
 constexpr u32 kFusionVa = 0;               // non-zero on a Fusion GPU
 

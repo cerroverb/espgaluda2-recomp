@@ -51,7 +51,7 @@ namespace {
 constexpr u32 kE_OUTOFMEMORY = 0x8007000Eu;
 // D3DVIEWPORT9 {0, 0, 0xFFFF, 0xFFFF, 0.0, 1.0} in N&B's data (unk_820018DC):
 // the whole surface. futari-nx: Futari's copy is at 0x820031D0.
-constexpr u32 kFullViewport = 0x820031D0;
+constexpr u32 kFullViewport = 0x82036450;  // espgaluda2-recomp: Futari 0x820031D0; map_B (the only {0,0,0xFFFF,0xFFFF,0,1} in the image)
 // D3DRS_HIZWRITEENABLE's index in the render state table.
 constexpr u32 kRenderStateHiZWriteEnable = 97;
 

@@ -50,7 +50,7 @@ using namespace renut::gpu;
 // sub_82088CE0 (N&B's 0x822399D8); a game core's copy frees its headers from
 // the core's own heap, so the core's forwarding names its copy for the call
 // (FutariRenutCallWithFree, banjo_renut_select.cpp).
-REX_IMPORT(__imp__sub_82088CE0, DefaultXMemFree, void(u32, u32));
+REX_IMPORT(__imp__sub_8215F3F8, DefaultXMemFree, void(u32, u32));  // espgaluda2-recomp: Futari sub_82088CE0; map_B
 namespace renut::gpu {
 thread_local PPCFunc *g_core_xmemfree = nullptr;
 }  // namespace renut::gpu
@@ -107,7 +107,7 @@ void FreeHeader(u32 va) {
 // the alignment from bits 24-27, the protection from bits 28-29), then
 // XPhysicalAlloc (0x82716060), which asks the kernel. 0 on failure.
 // futari-nx: Futari's XPhysicalAlloc is sub_82089ED8 and its flag 0x821ED308 (N&B's 0x82F39E34).
-constexpr u32 kGameNoLargePagesVa = 0x821ED308;  // XPhysicalAlloc drops MEM_LARGE_PAGES while set
+constexpr u32 kGameNoLargePagesVa = 0x829455EC;  // espgaluda2-recomp: Futari 0x821ED308; map_B (XPhysicalAlloc 8215EBB8) (XPhysicalAlloc drops MEM_LARGE_PAGES while set)
 
 u32 AllocPhysical(u32 size, u32 attributes) {
   static constexpr u32 kAlignment[16] = {4,    4,    4,     8,     16,    32,     64,     128,
@@ -132,7 +132,7 @@ void FreePhysical(u32 va) {
 
 // The GPU format table (word_820052F8): per D3D format low 6 bits, bits per
 // pixel in the low byte, flags in the high one.
-constexpr u32 kFormatTable = 0x82003430;  // futari-nx: Futari's (N&B's 0x820052F8)
+constexpr u32 kFormatTable = 0x820364C8;  // espgaluda2-recomp: Futari 0x82003430; map_A/map_B (futari-nx: Futari's (N&B's 0x820052F8))
 
 u16 FormatTableEntry(u32 format) {
   const auto *table = GuestPtr<const be_u16>(kFormatTable);
@@ -145,7 +145,7 @@ u32 FormatBitsPerPixel(u32 format) {
 
 // The word at 0x82FA36C8: set while a depth surface owns the HiZ memory. futari-nx: Futari's is 0x821ED330
 // (CreateSurface sub_8209D400 and D3DResource_Destroy sub_820A3E98).
-constexpr u32 kHiZOwnerVa = 0x821ED330;
+constexpr u32 kHiZOwnerVa = 0x829455F0;  // espgaluda2-recomp: Futari 0x821ED330; map_A/map_B (Destroy 8216F7B8)
 
 u32 LoadU32(u32 va) {
   const auto *p = GuestPtr<const be_u32>(va);
