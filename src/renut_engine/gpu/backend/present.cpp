@@ -43,6 +43,7 @@
 #endif
 
 REXCVAR_DECLARE(bool, futari_vblank_display_sync);  // src/me/me_native_system.cpp
+REXCVAR_DECLARE(bool, present_letterbox);           // the SDK's presenter (src/ui/presenter.cpp); espgaluda2-recomp
 
 // banjo-nx (2026-10-17, deko3d renderer tests): the captures copy the game's frame texture as it is (4-byte formats only,
 // its channels as BGRA), without the scan-out pass: which of the two a wrong capture comes from.
@@ -105,39 +106,40 @@ void RebuildSwapChain(VideoState &s) {
   }
 }
 
-// The most of the game's frame trimmed off either axis to fill the output.
-constexpr float kMaxTrim = 0.15f;
-
 struct FrameFit {
   plume::RenderViewport viewport;
   float visible[2] = {1.0f, 1.0f};  // the share of the frame shown on each axis
 };
 
-// The frame fills the output (a window that is not the frame's shape, say a
-// maximized one) without bars: it covers it, keeping its proportions, and the
-// part that overflows is trimmed evenly from both edges. Past kMaxTrim, the
-// rest is fitted with bars.
+// espgaluda2-recomp (original code, replacing futari-nx's fit, which trimmed up to 15% of the frame to fill the
+// output: on a 16:10 screen it cut 10% off the sides of this game's 16:9 image). The same rule as the SDK's
+// presenter (rexglue-sdk src/ui/presenter.cpp, overscan cutoff off as its default): with present_letterbox the
+// whole frame keeps its proportions, centred, with black bars (letterbox or pillarbox); without, it is stretched
+// over the whole output. Edges in whole pixels, so a 2x frame (renut_resolution 1440p on 2560x1600) is pixel-exact.
 FrameFit FitFrame(uint32_t out_w, uint32_t out_h, uint32_t src_w, uint32_t src_h) {
   FrameFit fit;
   fit.viewport = plume::RenderViewport(0.0f, 0.0f, float(out_w), float(out_h));
-  if (src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0)
+  if (src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0 || !REXCVAR_GET(present_letterbox))
     return fit;
-  const float out_aspect = float(out_w) / float(out_h);
-  float src_aspect = float(src_w) / float(src_h);
-  if (src_aspect > out_aspect) {
-    fit.visible[0] = std::max(out_aspect / src_aspect, 1.0f - kMaxTrim);
-    src_aspect *= fit.visible[0];
-  } else {
-    fit.visible[1] = std::max(src_aspect / out_aspect, 1.0f - kMaxTrim);
-    src_aspect /= fit.visible[1];
-  }
-  float w = float(out_w), h = float(out_h);
-  if (src_aspect > out_aspect)
-    h = w / src_aspect;
+  uint32_t w = out_w, h = out_h;
+  if (uint64_t(out_w) * src_h > uint64_t(out_h) * src_w)
+    w = uint32_t((uint64_t(out_h) * src_w + src_h / 2) / src_h);  // wider output: pillarbox
   else
-    w = h * src_aspect;
-  fit.viewport = plume::RenderViewport((float(out_w) - w) * 0.5f, (float(out_h) - h) * 0.5f, w, h);
+    h = uint32_t((uint64_t(out_w) * src_h + src_w / 2) / src_w);  // taller output: letterbox
+  fit.viewport = plume::RenderViewport(float((out_w - w) / 2), float((out_h - h) / 2), float(w), float(h));
   return fit;
+}
+
+// espgaluda2-recomp (original code): logs the output size and where the frame goes whenever either changes.
+void LogFrameFit(uint32_t out_w, uint32_t out_h, uint32_t src_w, uint32_t src_h, const FrameFit &fit) {
+  static uint32_t last[4] = {};
+  const uint32_t now[4] = {out_w, out_h, src_w, src_h};
+  if (std::equal(std::begin(now), std::end(now), std::begin(last)))
+    return;
+  std::copy(std::begin(now), std::end(now), std::begin(last));
+  RGPU_INFO("Output {}x{}: the game's {}x{} image shown at {}x{} from ({}, {}) (present_letterbox {})", out_w, out_h,
+            src_w, src_h, uint32_t(fit.viewport.width), uint32_t(fit.viewport.height), uint32_t(fit.viewport.x),
+            uint32_t(fit.viewport.y), REXCVAR_GET(present_letterbox) ? "on" : "off");
 }
 
 // banjo-nx (2026-10-20, banjo_renut_game_gamma): the gamma ramp the game loads, which the 360's display applies to
@@ -229,6 +231,7 @@ void RecordScanOut(VideoState &s, const PresentImage &image, uint32_t out_w, uin
   const uint32_t src_w = image.source_width ? image.source_width : image.width;
   const uint32_t src_h = image.source_height ? image.source_height : image.height;
   const FrameFit fit = FitFrame(out_w, out_h, src_w, src_h);
+  LogFrameFit(out_w, out_h, src_w, src_h, fit);
   const plume::RenderViewport &vp = fit.viewport;
   cmd->setViewports(vp);
   cmd->setScissors(plume::RenderRect(int32_t(vp.x), int32_t(vp.y), int32_t(vp.x + vp.width),

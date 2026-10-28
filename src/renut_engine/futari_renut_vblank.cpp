@@ -62,6 +62,13 @@ REXCVAR_DECLARE(bool, futari_vblank_display_sync);  // likewise
 REXCVAR_DECLARE(int32_t, futari_vblank_delay_us);   // likewise
 REXCVAR_DECLARE(bool, futari_vblank_phase_auto);    // likewise
 REXCVAR_DECLARE(int32_t, futari_vblank_phase_max_us);  // likewise
+// espgaluda2-recomp (original code, WORKLOG.md "Standing frame queue"); used in FromPresents.
+REXCVAR_DEFINE_INT32(espgaluda2_vblank_drain_frames, 30, "Espgaluda2/Renut",
+                     "With futari_vblank_display_sync: after this many images in a row shown a refresh late (one "
+                     "queued behind another at the display: a frame more input lag), skip one guest vblank so the "
+                     "queue empties (0 = never)")
+    .range(0, 600)
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 // futari-nx (2026-10-20): banjo-nx's display thread's placement (display_sync.cpp: priority 0x2C, pinned to core 2)
 // for the vblank thread (the display-synced vblank and the timer). Created as it was, the thread had the game
@@ -386,6 +393,14 @@ bool FromPresents(double nominal_ns) {
               phase_auto ? fmt::format("its phase found by measurement, at most {} us after it", phase_max_us)
                          : fmt::format("{} us after it", delay_us));
   double last_refresh = 0;
+  // espgaluda2-recomp (original code, WORKLOG.md "Standing frame queue"): an image queued behind another at the display
+  // stays queued for good when the game makes exactly one a refresh (after a stall that sent two in one refresh): every
+  // image is then shown a refresh late (input -> GPU done 33.6 ms instead of 17-19, swap -> present 15 ms), and the
+  // phase above only moves earlier. All images late for espgaluda2_vblank_drain_frames: one guest vblank is skipped, so one
+  // refresh gets no new image and the queued one is shown; one frame is shown twice, once (at most every 2 s).
+  const int32_t drain_after = REXCVAR_GET(espgaluda2_vblank_drain_frames);
+  uint64_t late_run = 0, drains = 0, next_drain_ns = 0;
+  bool drain = false;
   while (g_running.load(std::memory_order_acquire)) {
     double target;
     uint64_t late = 0, on_time = 0;
@@ -423,8 +438,19 @@ bool FromPresents(double nominal_ns) {
       if (++report >= 600) {  // every 10 s at 60 Hz
         report = 0;
         REXLOG_INFO("[latency] guest vblank {:.2f} ms after the display's refresh (futari_vblank_phase_auto, from the "
-                    "presents), ceiling {:.2f} ms, {} images shown a refresh late in all",
-                    double(delay_us) / 1000.0, double(ceiling_us) / 1000.0, late_total);
+                    "presents), ceiling {:.2f} ms, {} images shown a refresh late in all, {} queues drained",
+                    double(delay_us) / 1000.0, double(ceiling_us) / 1000.0, late_total, drains);
+      }
+    }
+    // espgaluda2-recomp (original code): the standing queue (above).
+    if (drain_after > 0) {
+      late_run = on_time ? 0 : late_run + late;
+      const uint64_t now = SteadyNs();
+      if (late_run >= uint64_t(drain_after) && now >= next_drain_ns) {
+        drain = true;
+        late_run = 0;
+        next_drain_ns = now + 2000000000ull;
+        ++drains;
       }
     }
     // Sleep to 0.5 ms before the vblank, then yield to it.
@@ -435,6 +461,10 @@ bool FromPresents(double nominal_ns) {
         rex::thread::Sleep(std::chrono::microseconds(int64_t((left - 500000.0) / 1000.0)));
       else
         std::this_thread::yield();
+    }
+    if (drain) {  // espgaluda2-recomp: this refresh without a guest vblank (the standing queue, above)
+      drain = false;
+      continue;
     }
     Vblank();
   }

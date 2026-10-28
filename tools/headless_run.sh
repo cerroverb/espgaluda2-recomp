@@ -3,6 +3,7 @@
 # Original code (WORKLOG.md "Original code"): the test harness for this machine (no display).
 #   tools/headless_run.sh <build dir> <out prefix> <seconds to run> "<shot times, seconds>" [game args...]
 # Screenshots: <out prefix>_<t>s.png; gamescope output: <out prefix>_gamescope.log.
+# Env: GS_W x GS_H output and game size (default 1280x720), GS_HZ refresh, GS_ARGS more gamescope args.
 set -u
 build=$1; prefix=$(realpath -m "$2"); total=$3; shots=$4; shift 4
 mkdir -p "$(dirname "$prefix")"
@@ -11,7 +12,7 @@ pactl list short sinks | grep -q espgaluda_sink || pactl load-module module-null
 stop_game() {
   # SIGTERM first: a SIGKILLed game leaves its guest memory file (/dev/shm/xenia_memory_*, ~4.8 GB sparse) behind,
   # and enough of them fill /dev/shm (the next start then dies with SIGBUS in Memory::Initialize).
-  pkill -x gamescope; pkill -TERM -x espgaluda2_reco
+  kill -9 $(pgrep -f '^gamescope --backend') 2>/dev/null; pkill -TERM -x espgaluda2_reco
   for i in $(seq 1 50); do pgrep -x espgaluda2_reco >/dev/null || break; sleep 0.1; done
   pkill -9 -x espgaluda2_reco
   sleep 0.5
@@ -21,7 +22,7 @@ stop_game
 # A fresh profile each run (the game saves its last menu choices in its system data, which made scripted menu
 # navigation differ from run to run); the shader and pipeline caches stay. HEADLESS_KEEP_SAVE=1 keeps it.
 [ "${HEADLESS_KEEP_SAVE:-0}" = 1 ] || rm -rf user_data/B13EBABEBABEBABE
-setsid gamescope --backend headless -W 1280 -H 720 -w 1280 -h 720 -r ${GS_HZ:-60} ${GS_ARGS:-} -- ./espgaluda2_recomp "$@" \
+setsid gamescope --backend headless -W ${GS_W:-1280} -H ${GS_H:-720} -w ${GS_W:-1280} -h ${GS_H:-720} -r ${GS_HZ:-60} ${GS_ARGS:-} -- ./espgaluda2_recomp "$@" \
   > "${prefix}_gamescope.log" 2>&1 &
 export GAMESCOPE_WAYLAND_DISPLAY=gamescope-0
 start=$(date +%s.%N)

@@ -2,6 +2,7 @@
 # Original code (WORKLOG.md "Clean exit"): asks the X11 windows of a process to close (WM_DELETE_WINDOW), as a window
 # manager's close button does. gamescope's window manager has no _NET_CLIENT_LIST, so wmctrl can't do it.
 #   DISPLAY=:0 tools/x11_close_window.py <pid>
+#   DISPLAY=:0 tools/x11_close_window.py <pid> --key F11    (sends a key press and release instead)
 import ctypes, ctypes.util, sys
 
 x = ctypes.CDLL(ctypes.util.find_library("X11"))
@@ -19,6 +20,18 @@ x.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong
                                  ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte))]
 x.XSendEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_long, ctypes.c_void_p]
 x.XFlush.argtypes = [ctypes.c_void_p]
+x.XStringToKeysym.restype = ctypes.c_ulong
+x.XStringToKeysym.argtypes = [ctypes.c_char_p]
+x.XKeysymToKeycode.restype = ctypes.c_ubyte
+x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+
+
+class XKeyEvent(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int),
+                ("display", ctypes.c_void_p), ("window", ctypes.c_ulong), ("root", ctypes.c_ulong),
+                ("subwindow", ctypes.c_ulong), ("time", ctypes.c_ulong), ("x", ctypes.c_int), ("y", ctypes.c_int),
+                ("x_root", ctypes.c_int), ("y_root", ctypes.c_int), ("state", ctypes.c_uint),
+                ("keycode", ctypes.c_uint), ("same_screen", ctypes.c_int), ("pad", ctypes.c_long * 16)]
 
 
 class XClientMessageEvent(ctypes.Structure):
@@ -55,13 +68,20 @@ def walk(w):
         yield from walk(kids[i])
 
 
+key = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == "--key" else None
 sent = 0
 for w in walk(x.XDefaultRootWindow(d)):
-    if window_pid(w) == pid:
+    if window_pid(w) == pid and key:
+        code = x.XKeysymToKeycode(d, x.XStringToKeysym(key.encode()))
+        for kind, mask in ((2, 1), (3, 2)):  # KeyPress / KeyPressMask, KeyRelease / KeyReleaseMask
+            e = XKeyEvent(type=kind, window=w, root=x.XDefaultRootWindow(d), keycode=code, same_screen=1)
+            x.XSendEvent(d, w, 1, mask, ctypes.byref(e))
+        sent += 1
+    elif window_pid(w) == pid:
         e = XClientMessageEvent(type=33, window=w, message_type=protocols, format=32)  # ClientMessage
         e.l[0], e.l[1] = delete, 0
         x.XSendEvent(d, w, 0, 0, ctypes.byref(e))
         sent += 1
 x.XFlush(d)
-print(f"WM_DELETE_WINDOW sent to {sent} window(s) of {pid}")
+print(f"{key or 'WM_DELETE_WINDOW'} sent to {sent} window(s) of {pid}")
 sys.exit(0 if sent else 1)
