@@ -86,9 +86,13 @@ namespace renut::gpu {
 VideoState *g_state = nullptr;
 
 VideoState &StateSlow() {
-  static VideoState s;
-  g_state = &s;
-  return s;
+  // espgaluda2-recomp (WORKLOG.md "Clean exit"): never destroyed. As a function-local static its destructor tore
+  // the Vulkan device (and with it gamescope's WSI layer state) down from exit(), after the window and the display
+  // connection were gone: SIGSEGV in vkDestroyDevice / the swapchain destructor at every exit. The process is
+  // ending; the driver frees what is left. Video::BeginShutdown still stops the threads and drains the GPU first.
+  static VideoState *s = new VideoState();
+  g_state = s;
+  return *s;
 }
 
 namespace {
@@ -987,6 +991,14 @@ void Video::BeginShutdown() {
   if (s.queue)
     detail::WaitAllSubmitted(s);
   banjo::renut_gpu::BeforeDeviceDestroyed();  // banjo-nx: the pipeline cache's last save
+  // espgaluda2-recomp (WORKLOG.md "Clean exit"): the swapchain and its framebuffers go now, while the window and its
+  // Wayland/X11 connection still exist. Left to VideoState's static destructor they were destroyed after the window
+  // at process exit: a SIGSEGV in VulkanSwapChain's destructor here (gamescope's WSI layer), and on the Legion
+  // "free(): corrupted unsorted chunks". The GPU is idle (WaitAllSubmitted above) and the render thread stopped.
+  s.swap_framebuffers.clear();
+  for (auto &retired : s.retired_framebuffers)
+    retired.clear();
+  s.swap_chain.reset();
 }
 
 plume::RenderDevice *Video::Device() {
