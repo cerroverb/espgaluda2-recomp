@@ -5,6 +5,7 @@
 #pragma once
 
 #include <rex/cvar.h>
+#include <rex/graphics/command_processor.h>
 #include <rex/graphics/graphics_system.h>
 #include <rex/filesystem.h>
 #include <rex/rex_app.h>
@@ -18,6 +19,7 @@
 
 #include "exit_guard.h"
 #include "futari_capture.h"
+#include "rate_counter.h"
 #include "futari_input_script.h"
 #include "game_setup.h"
 
@@ -135,6 +137,8 @@ class Espgaluda2RecompApp : public rex::ReXApp {
       futari::renut_vblank::Start();
       futari::capture::Start([](rex::ui::RawImage& image) { return renut::gpu::CaptureFrame(image, 100); },
                              [] { return rex::latency::SwapCount(); });
+      espgaluda2::rate_counter::Start([] { return futari::renut_vblank::Count(); },  // original code
+                                      [] { return rex::latency::PresentedCount(); });
       return;
     }
 #endif
@@ -144,10 +148,23 @@ class Espgaluda2RecompApp : public rex::ReXApp {
       auto* graphics = rt ? static_cast<rex::graphics::GraphicsSystem*>(rt->graphics_system()) : nullptr;
       return graphics ? graphics->presenter() : nullptr;
     });
+    // Original code: the emulated GPU's vblanks from CommandProcessor::counter, which MarkVblank and every PM4 swap
+    // packet (command_processor.cpp, after IssueSwap) both increment: less the game's Swaps. Its presents are not
+    // counted (the SDK's presenter has no counter).
+    espgaluda2::rate_counter::Start(
+        [this]() -> uint64_t {
+          const auto* rt = runtime();
+          auto* graphics = rt ? static_cast<rex::graphics::GraphicsSystem*>(rt->graphics_system()) : nullptr;
+          const uint64_t counter = graphics && graphics->command_processor() ? graphics->command_processor()->counter() : 0;
+          const uint64_t swaps = rex::latency::SwapCount();
+          return counter > swaps ? counter - swaps : 0;
+        },
+        {});
   }
 
   void OnShutdown() override {
     espgaluda2::exit_guard::ArmExitWatchdog();  // original code, src/exit_guard.h
+    espgaluda2::rate_counter::Stop();
     installer_.Stop();
     futari::capture::Stop();
 #if FUTARI_RENUT_RENDERER
