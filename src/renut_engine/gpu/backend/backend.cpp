@@ -3,6 +3,7 @@
  * @file    gpu/backend/backend.cpp
  */
 #include "renut_engine/gpu/backend/backend.h"
+#include "renut_engine/gpu/backend/native_window.h"  // espgaluda2-recomp
 
 #include <algorithm>
 #include <atomic>
@@ -45,7 +46,12 @@ REXCVAR_DEFINE_BOOL(renut_vulkan_debug_layers, false, "Nuts&Bolts/Graphics",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace plume {
+#if defined(PLUME_SDL_VULKAN_ENABLED)
+// espgaluda2-recomp: plume's SDL form (renut-patches/0003) takes the SDL window; with SDL3 it is not used.
+std::unique_ptr<RenderInterface> CreateVulkanInterface(RenderWindow sdlWindow);
+#else
 std::unique_ptr<RenderInterface> CreateVulkanInterface();
+#endif
 #if defined(_WIN32)
 std::unique_ptr<RenderInterface> CreateD3D12Interface();
 #endif
@@ -296,7 +302,13 @@ std::unique_ptr<plume::RenderInterface> CreateRenderInterface() {
 #endif
   if (REXCVAR_GET(renut_vulkan_debug_layers))
     EnableVulkanDebugLayers();
+#if defined(PLUME_SDL_VULKAN_ENABLED)
+  plume::RenderWindow sdl_window{};
+  GetNativeRenderWindow(sdl_window);  // espgaluda2-recomp: the SDL window (any: SDL3 needs none here)
+  auto render_interface = plume::CreateVulkanInterface(sdl_window);
+#else
   auto render_interface = plume::CreateVulkanInterface();
+#endif
   if (render_interface)
     RouteVulkanPipelineCreation();
   return render_interface;

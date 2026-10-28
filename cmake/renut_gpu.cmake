@@ -66,6 +66,10 @@ if(TARGET o1heap AND NOT TARGET rex::o1heap)
     add_library(rex::o1heap ALIAS o1heap)
 endif()
 
+# The SDK's window is SDL3 (sdk-patches/0006): plume makes its surface through SDL (renut-patches/0003), so the
+# renderer presents on Wayland or X11, whichever SDL picked (the SDK's video_driver cvar can force one).
+set(PLUME_SDL_VULKAN_ENABLED ON CACHE BOOL "" FORCE)
+set(PLUME_SDL3_TARGET SDL3::SDL3-static CACHE STRING "" FORCE)
 include("${CMAKE_CURRENT_SOURCE_DIR}/src/renut_engine/gpu/gpu.cmake")
 # plume's copy of volk under its own names (renut-patches/0002): ReXGlue 0.8.0 links its volk statically into the same
 # executable. PUBLIC, so the renderer's own Vulkan calls name plume's pointers too.
@@ -86,11 +90,6 @@ target_include_directories(espgaluda2_renut_gpu PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${REXGLUE_ENTRYPOINT_INCLUDE_DIR}")
 target_compile_definitions(espgaluda2_renut_gpu PRIVATE FUTARI_RENUT_RENDERER=1)
-# ReXGlue 0.8.0's Linux window is GTK: the renderer takes its surface from it (gpu/backend/native_window.cpp).
-target_compile_definitions(espgaluda2_renut_gpu PRIVATE ESPGALUDA2_GTK_WINDOW=1)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(ESPGALUDA2_GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
-target_link_libraries(espgaluda2_renut_gpu PRIVATE PkgConfig::ESPGALUDA2_GTK3)
 target_link_libraries(espgaluda2_renut_gpu PRIVATE rex::runtime)
 renut_gpu_setup(espgaluda2_renut_gpu)
 target_link_libraries(espgaluda2_recomp PRIVATE espgaluda2_renut_gpu)

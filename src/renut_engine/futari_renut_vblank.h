@@ -12,5 +12,7 @@ void Start();
 void Stop();
 // Vblanks raised so far.
 uint64_t Count();
+// espgaluda2-recomp: waits until Count() >= target (false after timeout_ms, or when the thread stops).
+bool WaitForCount(uint64_t target, uint32_t timeout_ms);
 
 }  // namespace futari::renut_vblank
