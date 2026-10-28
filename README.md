@@ -15,8 +15,6 @@ Partly. The game's PowerPC code is recompiled ahead of time into C++ and runs
 natively on x86-64, including `default.xex` and the seven `dat*.xex` modules.
 There is no CPU emulation or JIT. Graphics and audio are not native yet.
 
-### What is still emulated?
-
 The game still drives an emulated Xbox 360 GPU. ReXGlue's Xenia-derived Vulkan
 backend handles the Xenos command stream and EDRAM, and translates the game's
 shaders at runtime. Audio goes through emulated XMA decoding, and the Xbox kernel
