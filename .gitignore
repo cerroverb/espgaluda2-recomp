@@ -16,6 +16,9 @@
 !/sdk-patches/
 !/packaging/
 !/tools/
+!/cmake/
+!/docs/
+!/LICENSE-GPL-3.0
 
 *.xex
 *.iso
