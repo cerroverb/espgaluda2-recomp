@@ -1,7 +1,6 @@
 # Backport to the SDOJ-bundled ReXGlue 0.8.0 of the platform-neutral part of upstream rexglue-sdk df2743b
 # (github.com/rexglue/rexglue-sdk, BSD-3-Clause): SDL_EVENT_QUIT (SDL turns SIGINT/SIGTERM into it) goes through the
 # normal window close path (ProcessQuitRequest), also synchronously from an event watch. Its Cocoa parts left out.
-# Plus espgaluda2-recomp's own: the UI loop checks the Wayland socket for a hang-up twice a second (lost compositor).
 diff --git a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_sdl.h b/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_sdl.h
 index 4d1e22fe..23737b36 100644
 --- a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_sdl.h
@@ -22,10 +21,10 @@ index 4d1e22fe..23737b36 100644
  
  }  // namespace rex::ui
 diff --git a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp b/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp
-index 9eb22642..ca13b5b4 100644
+index 9eb22642..048c64a9 100644
 --- a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp
 +++ b/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp
-@@ -12,10 +12,16 @@
+@@ -12,6 +12,7 @@
  #include <rex/ui/windowed_app_context_sdl.h>
  
  #include <cstdlib>
@@ -33,16 +32,7 @@ index 9eb22642..ca13b5b4 100644
  #include <string>
  
  #include <SDL3/SDL.h>
- 
-+#if REX_PLATFORM_GNU_LINUX
-+#include <poll.h>
-+#include <wayland-client.h>
-+#endif
-+
- #include <rex/cvar.h>
- #include <rex/logging.h>
- #include <rex/ui/flags.h>
-@@ -25,6 +31,10 @@
+@@ -25,6 +26,10 @@
  namespace rex::ui {
  
  SDLWindowedAppContext::~SDLWindowedAppContext() {
@@ -53,7 +43,7 @@ index 9eb22642..ca13b5b4 100644
    // Execute leftover pending functions before the loop machinery goes away,
    // mirroring the shutdown contract documented in WindowedAppContext.
    ExecutePendingFunctionsFromUIThread();
-@@ -53,6 +63,11 @@ bool SDLWindowedAppContext::Initialize() {
+@@ -53,6 +58,11 @@ bool SDLWindowedAppContext::Initialize() {
    }
    wakeup_event_type_ = first;
    paint_event_type_ = first + 1;
@@ -65,49 +55,7 @@ index 9eb22642..ca13b5b4 100644
    return true;
  }
  
-@@ -69,12 +84,38 @@ void SDLWindowedAppContext::PlatformQuitFromUIThread() {
-   NotifyUILoopOfPendingFunctions();
- }
- 
-+namespace {
-+// espgaluda2-recomp (sdk-patches/0007): whether the Wayland display's socket hung up (SDL's wayland driver only).
-+bool WaylandConnectionLost() {
-+#if REX_PLATFORM_GNU_LINUX
-+  auto* display = static_cast<struct wl_display*>(SDL_GetPointerProperty(
-+      SDL_GetGlobalProperties(), SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DISPLAY_POINTER, nullptr));
-+  if (!display) {
-+    return false;
-+  }
-+  pollfd fd{wl_display_get_fd(display), POLLIN, 0};
-+  return poll(&fd, 1, 0) > 0 && (fd.revents & (POLLHUP | POLLERR)) != 0;
-+#else
-+  return false;
-+#endif
-+}
-+}  // namespace
-+
- int SDLWindowedAppContext::RunMainMessageLoop() {
-   while (!HasQuitFromUIThread()) {
-     SDL_Event event;
--    if (!SDL_WaitEvent(&event)) {
--      REXLOG_ERROR("SDL_WaitEvent failed: {}", SDL_GetError());
--      return EXIT_FAILURE;
-+    // espgaluda2-recomp (sdk-patches/0007, original code): wake twice a second to notice a lost Wayland connection.
-+    // SDL only notices it when its own read fails, and another thread (a renderer's present wait in the Vulkan WSI)
-+    // can hold the Wayland read lock, so the window stayed open on a dead compositor. A hang-up on the display's
-+    // socket becomes SDL's own quit event (as SDL sends on a failed read), which closes through the window path.
-+    if (!SDL_WaitEventTimeout(&event, 500)) {
-+      if (WaylandConnectionLost()) {
-+        REXLOG_ERROR("Wayland display connection lost: quitting");
-+        SDL_Event quit{};
-+        quit.type = SDL_EVENT_QUIT;
-+        SDL_PushEvent(&quit);
-+      }
-+      continue;
-     }
-     ProcessEvent(event);
-   }
-@@ -99,6 +140,13 @@ void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
+@@ -99,6 +109,13 @@ void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
      return;
    }
    switch (event.type) {
@@ -121,7 +69,7 @@ index 9eb22642..ca13b5b4 100644
      case SDL_EVENT_KEY_DOWN:
      case SDL_EVENT_KEY_UP: {
        if (WindowSDL* window = GetWindow(event.key.windowID)) {
-@@ -142,4 +190,34 @@ void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
+@@ -142,4 +159,34 @@ void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
    }
  }
  
