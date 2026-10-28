@@ -1,0 +1,25 @@
+diff --git a/app/thirdparty/reblue-XenosRecomp/thirdparty/dxc-bin/CMakeLists.txt b/app/thirdparty/reblue-XenosRecomp/thirdparty/dxc-bin/CMakeLists.txt
+index ad19182..27627c0 100644
+--- a/app/thirdparty/reblue-XenosRecomp/thirdparty/dxc-bin/CMakeLists.txt
++++ b/app/thirdparty/reblue-XenosRecomp/thirdparty/dxc-bin/CMakeLists.txt
+@@ -20,9 +20,19 @@ if (DXC_ARCHITECTURE STREQUAL "x86_64" OR DXC_ARCHITECTURE STREQUAL "amd64")
+     elseif (APPLE)
+         set(DIRECTX_DXC_TOOL "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/x64" "${PROJECT_SOURCE_DIR}/bin/x64/dxc-macos" CACHE INTERNAL "")
+         set(DIRECTX_DXCOMPILER_LIB "${PROJECT_SOURCE_DIR}/lib/x64/libdxcompiler.dylib")
+-    else()
++    elseif (EXISTS "${PROJECT_SOURCE_DIR}/lib/x64/libdxcompiler.so")
+         set(DIRECTX_DXC_TOOL "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/x64" "${PROJECT_SOURCE_DIR}/bin/x64/dxc-linux" CACHE INTERNAL "")
+         set(DIRECTX_DXCOMPILER_LIB "${PROJECT_SOURCE_DIR}/lib/x64/libdxcompiler.so")
++    else()
++        # espgaluda2-recomp: dxc-bin's binaries are not in git; the system's DirectXShaderCompiler, as futari-nx
++        # PR 2 (7f5a36a) does for Linux AArch64 in this file.
++        find_program(DXC_SYSTEM_TOOL NAMES dxc)
++        find_library(DXC_SYSTEM_LIB NAMES dxcompiler)
++        if (NOT DXC_SYSTEM_TOOL OR NOT DXC_SYSTEM_LIB)
++            message(FATAL_ERROR "Linux x86-64: install DirectXShaderCompiler (dxc and libdxcompiler.so)")
++        endif()
++        set(DIRECTX_DXC_TOOL "${DXC_SYSTEM_TOOL}" CACHE INTERNAL "")
++        set(DIRECTX_DXCOMPILER_LIB "${DXC_SYSTEM_LIB}")
+     endif()
+ elseif (DXC_ARCHITECTURE STREQUAL "arm64" OR DXC_ARCHITECTURE STREQUAL "aarch64")
+     if (WIN32)
