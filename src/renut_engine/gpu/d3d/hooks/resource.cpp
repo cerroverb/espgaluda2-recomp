@@ -670,10 +670,11 @@ u32 LockResource(u32 resource, u32 mip_lock, u32 base_address, u32 mip_address, 
   // back to it, as the console's GPU has after the ring's frequent kicks. This renderer reads a draw's vertices only at
   // the next kick, on the render thread (draw.cpp FlushVertexFillsLocked), about 3 times a frame: on busy frames the
   // rotation wrapped first and earlier draws read the overwritten data (sprite atlas garbage).
+  // Only the work that used this buffer: its write fence (+0x8), which SetStreamSource / SetIndices set when the
+  // next buffer is bound (TagResourceFence), not the read fence a no-overwrite lock otherwise takes.
   if ((flags & 0x1000) && kNoOverwriteWaits && ((common & 0xF) == 1 || (common & 0xF) == 2)) {
-    const u32 device_va = native::GlobalDevice();
-    if (const u32 current = native::DeviceAt(device_va).W(native::off::FenceTag))
-      native::BlockOnFence(device_va, current);
+    if (const u32 used = LoadU32(fenced + 0x8))
+      native::BlockOnFence(native::GlobalDevice(), used);
   }
   // Unless the lock is read-only or no-overwrite, D3D would then queue a GPU
   // cache invalidation of the range (into the ring, or for another thread a
