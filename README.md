@@ -11,16 +11,13 @@ No game data is included. You need your own dump of the game.
 
 ### Is this a native port?
 
-Partly. The game's PowerPC code is recompiled ahead of time into C++ and runs
-natively on x86-64, including `default.xex` and the seven `dat*.xex` modules.
-There is no CPU emulation or JIT. Graphics and audio are not native yet.
-
-### What is still emulated?
-
-The game still drives an emulated Xbox 360 GPU. ReXGlue's Xenia-derived Vulkan
-backend handles the Xenos command stream and EDRAM, and translates the game's
-shaders at runtime. Audio goes through emulated XMA decoding, and the Xbox kernel
-and XAM calls are Xenia's high-level implementations.
+Only the game code is native. The PowerPC code of `default.xex` and the seven
+`dat*.xex` modules is recompiled ahead of time into C++ and runs directly on
+x86-64, with no CPU emulation or JIT. Everything else still goes through
+emulation. ReXGlue's Xenia-derived Vulkan backend emulates the Xbox 360 GPU,
+including the Xenos command stream and EDRAM, and translates the game's shaders
+at runtime. Audio goes through emulated XMA decoding, and the Xbox kernel and XAM
+calls are Xenia's high-level implementations.
 
 ### Will graphics and audio become native?
 
