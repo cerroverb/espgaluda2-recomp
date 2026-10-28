@@ -2,7 +2,7 @@
 #pragma once
 
 #include <rex/logging.h>
-#include "generated/renut_init.h"
+#include "generated/default/espgaluda2_recomp_init.h"  // espgaluda2-recomp: was generated/renut_init.h
 
 
 

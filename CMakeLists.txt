@@ -48,6 +48,8 @@ set(ESPGALUDA2RECOMP_SOURCES
     src/main.cpp
     src/game_setup.cpp
     src/latency_patch.cpp
+    src/futari_capture.cpp
+    src/futari_input_script.cpp
 )
 
 if(WIN32)
@@ -57,6 +59,23 @@ else()
 endif()
 
 rexglue_setup_target(espgaluda2_recomp)
+
+# The recorder (src/futari_capture.cpp) hashes frames with the SDK's xxHash. Per source and LINK_ONLY: target-wide
+# include directories would change the command line of every generated file.
+if(TARGET xxhash)
+    set_property(SOURCE src/futari_capture.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
+                 $<TARGET_PROPERTY:xxhash,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(espgaluda2_recomp PRIVATE $<LINK_ONLY:xxhash>)
+endif()
+
+# Native renderer: Renut's Direct3D-level renderer on plume/Vulkan (cmake/renut_gpu.cmake), chosen at boot with
+# --espgaluda2_renderer=renut; the SDK's emulated Xenos GPU stays the other choice. OFF builds only the emulated path.
+option(ESPGALUDA2_RENUT_RENDERER "Build Renut's Direct3D-level native renderer" ON)
+if(ESPGALUDA2_RENUT_RENDERER)
+    include(cmake/renut_gpu.cmake)
+    # Only on the sources that use it: on the whole target it would change the command line of every generated file.
+    set_property(SOURCE src/main.cpp src/latency_patch.cpp APPEND PROPERTY COMPILE_DEFINITIONS FUTARI_RENUT_RENDERER=1)
+endif()
 
 if(NOT WIN32)
     # copy the runtime libraries next to the executable

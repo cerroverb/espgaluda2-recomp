@@ -9,7 +9,9 @@
 include(ExternalProject)
 
 set(RENUT_GPU_DIR "${CMAKE_CURRENT_LIST_DIR}")
-set(RENUT_XENOS_RECOMP_DIR "${CMAKE_SOURCE_DIR}/thirdparty/reblue-XenosRecomp")
+# espgaluda2-recomp: plume, XenosRecomp and ImGui come from the futari-nx tree fetched by cmake/renut_gpu.cmake
+# (RENUT_THIRDPARTY_DIR = <futari-nx>/app/thirdparty), not a vendored copy.
+set(RENUT_XENOS_RECOMP_DIR "${RENUT_THIRDPARTY_DIR}/reblue-XenosRecomp")
 set(RENUT_SHADER_COMMON_DIR "${RENUT_XENOS_RECOMP_DIR}/XenosRecomp")
 set(RENUT_GPU_GEN_DIR "${CMAKE_BINARY_DIR}/renut_gpu")
 
@@ -36,7 +38,7 @@ endif()
 
 # plume is read-only and vendored; build it as-is.
 if(NOT TARGET plume)
-    add_subdirectory("${CMAKE_SOURCE_DIR}/thirdparty/plume" "${CMAKE_BINARY_DIR}/plume")
+    add_subdirectory("${RENUT_THIRDPARTY_DIR}/plume" "${CMAKE_BINARY_DIR}/plume")
 endif()
 
 # The shader cache is zstd-compressed and its SPIR-V is smol-v encoded. Only the
@@ -82,6 +84,14 @@ elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$" AND NOT CMA
         message(FATAL_ERROR "No dxc on the PATH: install DirectXShaderCompiler (docs/building-linux.md) or set FUTARI_DXC")
     endif()
     set(RENUT_DXC "${FUTARI_SYSTEM_DXC}")
+elseif(NOT EXISTS "${RENUT_DXC_BIN_DIR}/dxc-linux")
+    # espgaluda2-recomp: dxc-bin's binaries are not in the futari-nx git tree, so on x86-64 Linux too the system's
+    # DirectXShaderCompiler (Arch: directx-shader-compiler), as futari-nx PR 2 does for AArch64.
+    find_program(FUTARI_SYSTEM_DXC NAMES dxc)
+    if(NOT FUTARI_SYSTEM_DXC)
+        message(FATAL_ERROR "No dxc on the PATH: install directx-shader-compiler or set FUTARI_DXC")
+    endif()
+    set(RENUT_DXC "${FUTARI_SYSTEM_DXC}")
 else()
     # The Linux binary finds libdxcompiler next to it.
     set(RENUT_DXC env "LD_LIBRARY_PATH=${RENUT_XENOS_RECOMP_DIR}/thirdparty/dxc-bin/lib/x64" "${RENUT_DXC_BIN_DIR}/dxc-linux")
@@ -125,13 +135,13 @@ function(renut_host_shader TARGET STEM PROFILE)
     # builds with plume's deko3d back end (docs/deko3d-renderer.md).
     if(BANJO_DEKO3D_HOST_SHADERS)
         set(out "${RENUT_GPU_GEN_DIR}/host_shaders/${STEM}.deko3d.h")
-        set(tool "${CMAKE_SOURCE_DIR}/../tools/deko3d_host_shader.py")
+        set(tool "${CMAKE_SOURCE_DIR}/tools/deko3d_host_shader.py")
         add_custom_command(
             OUTPUT "${out}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${RENUT_GPU_GEN_DIR}/host_shaders"
             COMMAND "${PYTHON_EXECUTABLE}" "${tool}" --dxc ${RENUT_DXC} --spirv-cross "${BANJO_DEKO3D_SPIRV_CROSS}"
                     --uam "${BANJO_DEKO3D_UAM}" --profile ${PROFILE} --stem ${STEM} --src "${src}" --out "${out}"
-            DEPENDS "${src}" ${host_includes} "${tool}" "${CMAKE_SOURCE_DIR}/../tools/deko3d_glsl.py"
+            DEPENDS "${src}" ${host_includes} "${tool}" "${CMAKE_SOURCE_DIR}/tools/deko3d_glsl.py"
             COMMENT "Compiling host shader ${STEM}.hlsl (${PROFILE}, deko3d)"
             VERBATIM)
         target_sources(${TARGET} PRIVATE "${out}")
@@ -219,10 +229,10 @@ function(renut_xenos_shader_cache TARGET)
             COMMAND ${CMAKE_COMMAND} -E env BANJO_HLSL_DUMP_ONLY=1 "${recomp_exe}" "${RENUT_SHADER_DUMP_DIR}"
                     "${RENUT_GPU_GEN_DIR}/early_alpha_pass1.cpp" "${RENUT_SHADER_COMMON_DIR}/shader_common.h"
                     "${early_alpha_dir}"
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/renut_early_alpha.py" "${early_alpha_dir}")
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/renut_early_alpha.py" "${early_alpha_dir}")
         set(early_alpha_env ${CMAKE_COMMAND} -E env "BANJO_HLSL_OVERRIDE=${early_alpha_dir}")
-        set(early_alpha_depends "${CMAKE_SOURCE_DIR}/../tools/renut_early_alpha.py"
-                                "${CMAKE_SOURCE_DIR}/../tools/early_alpha.py")
+        set(early_alpha_depends "${CMAKE_SOURCE_DIR}/tools/renut_early_alpha.py"
+                                "${CMAKE_SOURCE_DIR}/tools/early_alpha.py")
     else()
         set(early_alpha_commands)
         set(early_alpha_env)
@@ -322,7 +332,7 @@ function(renut_gpu_setup TARGET)
     # polls input), which pulled the overlay's context away mid-frame. Compiled
     # into the executable, these definitions take precedence over rexruntime's
     # imports; the headers go ahead of the SDK's identical ones.
-    set(RENUT_IMGUI_DIR "${CMAKE_SOURCE_DIR}/thirdparty/imgui")
+    set(RENUT_IMGUI_DIR "${RENUT_THIRDPARTY_DIR}/imgui")
     set(renut_imgui_sources
         "${RENUT_IMGUI_DIR}/imgui.cpp"
         "${RENUT_IMGUI_DIR}/imgui_draw.cpp"

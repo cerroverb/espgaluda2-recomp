@@ -8,8 +8,8 @@
 
 #include <rex/cvar.h>
 
-#include "futari_enhancements.h"
-#include "native/futari_native.h"
+// espgaluda2-recomp: futari_enhancements.h -> renut_engine/espgaluda2_renut_glue.h (included below)
+#include "renut_engine/espgaluda2_renut_glue.h"  // espgaluda2-recomp: was native/futari_native.h
 
 // futari-nx (2026-10-20, input latency, the user's request through banjo-nx): a 2-image swapchain (backend/video.cpp).
 // With 3 (the frames in flight + 1) a finished image can wait behind another for the display; with 2 the GPU's next

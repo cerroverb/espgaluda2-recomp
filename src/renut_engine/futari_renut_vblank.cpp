@@ -44,7 +44,7 @@
 #include <mutex>
 #include <thread>
 
-#include "native/futari_native.h"
+#include "renut_engine/espgaluda2_renut_glue.h"  // espgaluda2-recomp: was native/futari_native.h
 #include "renut_engine/display_sync.h"  // futari-nx: DefaultWindowDisplay
 #include "renut_engine/gpu/backend/video.h"
 #include "renut_engine/gpu/d3d/d3d_native.h"

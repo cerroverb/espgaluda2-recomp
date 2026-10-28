@@ -13,7 +13,26 @@
 #include <functional>
 #include <optional>
 
+#include "futari_capture.h"
+#include "futari_input_script.h"
 #include "game_setup.h"
+
+#if FUTARI_RENUT_RENDERER
+// Renut's Direct3D-level renderer (--espgaluda2_renderer=renut; cmake/renut_gpu.cmake). The hooks below are
+// futari-nx's (github.com/ChanseyIsTheBest/futari-nx, pull request 2, commit 7f5a36a, app/src/futari_app.h,
+// GPL-3.0), unchanged in what they do.
+#include <rex/frame_latency.h>
+#include <rex/runtime.h>
+#include <rex/ui/immediate_drawer.h>
+
+#include "renut_engine/futari_renut_vblank.h"
+#include "renut_engine/gpu/banjo_renut_capture.h"
+#include "renut_engine/gpu/banjo_renut_select.h"
+#include "renut_engine/gpu/overlay/app_integration.h"
+#endif
+
+#include <cstdio>
+#include <cstdlib>
 
 class Espgaluda2RecompApp : public rex::ReXApp {
  public:
@@ -46,6 +65,13 @@ class Espgaluda2RecompApp : public rex::ReXApp {
   std::optional<rex::PathConfig> OnFinalizePaths(
       const rex::PathConfig& defaults,
       std::function<void(rex::PathConfig)> resume) override {
+#if FUTARI_RENUT_RENDERER
+    // futari-nx futari_app.h: the window exists here (UI thread, before the game starts): Renut's renderer comes up
+    // first.
+    if (banjo::renut_gpu::Active()) {
+      renut::gpu::StartRenderer(app_context(), [this] { return imgui_drawer(); });
+    }
+#endif
     if (auto folder = game_setup::FindGameFolder(defaults.game_data_root)) {
       auto paths = defaults;
       paths.game_data_root = *folder;
@@ -70,7 +96,78 @@ class Espgaluda2RecompApp : public rex::ReXApp {
     return std::nullopt;
   }
 
-  void OnShutdown() override { installer_.Stop(); }
+  // futari-nx futari_app.h OnPreSetup: with Renut's renderer, no SDK graphics system and no GPU plugin (the SDK's
+  // detached mode, sdk-patches/0002).
+  void OnPreSetup(rex::RuntimeConfig& config) override {
+#if FUTARI_RENUT_RENDERER
+    if (banjo::renut_gpu::Active()) {
+      renut::gpu::ConfigureRuntime(config);
+      REXLOG_INFO("graphics: Renut's Direct3D-level renderer (plume; no PM4 ring, no EDRAM model)");
+      return;
+    }
+#endif
+    (void)config;
+    REXLOG_INFO("graphics: the SDK's emulated Xenos GPU");
+  }
+
+  // futari-nx futari_app.h OnPostSetup: the scripted pad, the recorder and Renut's vblank thread.
+  void OnPostSetup() override {
+    futari::input_script::Install(runtime());
+#if FUTARI_RENUT_RENDERER
+    // Renut's renderer has no GPU: the guest's vertical blank comes from a thread of its own.
+    if (banjo::renut_gpu::Active()) {
+      futari::renut_vblank::Start();
+      futari::capture::Start([](rex::ui::RawImage& image) { return renut::gpu::CaptureFrame(image, 100); },
+                             [] { return rex::latency::SwapCount(); });
+      return;
+    }
+#endif
+    futari::capture::Start([this]() -> rex::ui::Presenter* {
+      const auto* rt = runtime();
+      const auto* graphics = rt ? rt->graphics_system() : nullptr;
+      return graphics ? graphics->presenter() : nullptr;
+    });
+  }
+
+  void OnShutdown() override {
+    installer_.Stop();
+    futari::capture::Stop();
+#if FUTARI_RENUT_RENDERER
+    if (banjo::renut_gpu::Active()) {
+      futari::renut_vblank::Stop();
+      renut::gpu::ShutdownRenderer();
+    }
+#endif
+  }
+
+#if FUTARI_RENUT_RENDERER
+  // futari-nx futari_app.h: Renut's renderer draws the SDK's ImGui through its own plume drawer, and resizes its
+  // swapchain itself.
+  std::unique_ptr<rex::ui::ImmediateDrawer> OnCreateImmediateDrawer() override {
+    if (banjo::renut_gpu::Active()) return renut::gpu::CreateOverlayDrawer();
+    return rex::ReXApp::OnCreateImmediateDrawer();
+  }
+  void OnWindowPixelSizeChanged(uint32_t pixel_width, uint32_t pixel_height) override {
+    rex::ReXApp::OnWindowPixelSizeChanged(pixel_width, pixel_height);
+    if (banjo::renut_gpu::Active()) renut::gpu::OnWindowResized();
+  }
+#endif
+
+  // futari-nx futari_app.h OnPostLoadXexImage: with ESPGALUDA2_DUMP_IMAGE=<file>, write the loaded default.xex image
+  // (image_base..image_base+image_size), which tools/renut_dump_shaders.py reads the shader containers from.
+  void OnPostLoadXexImage() override {
+    const char* path = std::getenv("ESPGALUDA2_DUMP_IMAGE");
+    if (!path || !runtime() || !runtime()->memory()) {
+      return;
+    }
+    const uint8_t* image =
+        runtime()->memory()->TranslateVirtual<const uint8_t*>(PPCImageConfig.image_base);
+    if (std::FILE* f = std::fopen(path, "wb")) {
+      std::fwrite(image, 1, PPCImageConfig.image_size, f);
+      std::fclose(f);
+      REXLOG_INFO("guest image written to {}", path);
+    }
+  }
 
  private:
   game_setup::IsoInstaller installer_;
