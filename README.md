@@ -11,7 +11,7 @@ No game data is included. You need your own dump of the game.
 
 ### Windows/macOS?
 
-Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) are things I'm exploring.
+Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) though maybe.
 
 ### Is this a native port?
 
