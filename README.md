@@ -9,6 +9,10 @@ No game data is included. You need your own dump of the game.
 
 ## FAQ
 
+### Windows/macOS?
+
+Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) are things I'm exploring.
+
 ### Is this a native port?
 
 Only the game code is native. The PowerPC code of `default.xex` and the seven
