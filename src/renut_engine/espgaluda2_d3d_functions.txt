@@ -20,10 +20,13 @@ D3DDevice_SetPixelShader               821682F8  WORKLOG: delta 0xCD778 object, 
 D3DDevice_SetVertexShader              821684B8  WORKLOG: delta 0xCD778 object, exact size 0x1D0; VS at +0x3248
 D3DDevice_SetVertexDeclaration         82168688  map_A: stw r4,+0x2ED8; UnsetAll calls it
 D3DDevice_CreateVertexDeclaration      82168790  WORKLOG: delta 0xCD778 object, exact size 0x80
+D3DDevice_SetFVF                       8216A060  map_A: +12608 FVF, declaration built at +12368 and stored at +0x2ED8. Not in futari's list; hook is espgaluda2-recomp's own (shader.cpp)
 D3DDevice_SetShaderGPRAllocation       82168810  map_A: +0x2AA8 packing as reNut kGprAllocation
-D3DDevice_CreatePixelShader            82169D88  map_A: copies container, calls XGRegisterPixelShader
+# D3DDevice_CreatePixelShader            82169D88  map_A: copies container, calls XGRegisterPixelShader
+#   left to the original (WORKLOG "First native runs"): its XDK shader object is read by the game's D3DX/effect code; it calls the hooked XGRegister*Shader
 XGRegisterVertexShader                 82169E78  map_A: 872-byte header, type 6
-D3DDevice_CreateVertexShader           82169F70  map_A: copies container, calls XGRegisterVertexShader
+# D3DDevice_CreateVertexShader           82169F70  map_A: copies container, calls XGRegisterVertexShader
+#   left to the original (WORKLOG "First native runs"): its XDK shader object is read by the game's D3DX/effect code; it calls the hooked XGRegister*Shader
 D3D_GetTextureDimensions               82163028  map_A: texture header +0x24/+0x28/+0x30 decode
 D3D_GetGpuTextureDimensions            821630C0  map_A: same decode from a fetch constant
 D3DSurface_UnlockRect                  82163160  map_A: UnlockResource(parent, ...) tail call, size 0x18

@@ -2,6 +2,13 @@
 /**
  * @file    gpu/backend/native_window.cpp
  */
+#if defined(ESPGALUDA2_GTK_WINDOW)
+// espgaluda2-recomp: before plume's headers, which #undef Xlib's Status macro (plume_render_interface_types.h) that
+// gdkx.h's Xutil.h needs.
+#include <X11/Xlib.h>
+#include <gdk/gdkx.h>
+#include <gtk/gtk.h>
+#endif
 #include "renut_engine/gpu/backend/native_window.h"
 
 #include "renut_engine/gpu/log.h"
@@ -10,6 +17,13 @@
 #include <windows.h>
 #elif defined(__SWITCH__)
 #include <switch.h>
+#elif defined(ESPGALUDA2_GTK_WINDOW)
+// espgaluda2-recomp: ReXGlue 0.8.0's Linux window is GTK (window_gtk.cpp), not SDL as in futari-nx's SDK.
+#include <mutex>
+
+#include <X11/Xlib.h>
+#include <gdk/gdkx.h>
+#include <gtk/gtk.h>
 #else
 #include <cstdlib>
 
@@ -88,6 +102,78 @@ bool GetRenderWindowPixelSize(uint32_t &width, uint32_t &height) {
     return false;
   width = w;
   height = h;
+  return true;
+}
+
+#elif defined(ESPGALUDA2_GTK_WINDOW)
+
+// espgaluda2-recomp (original code, WORKLOG.md "Original code"): the GTK window of ReXGlue 0.8.0. The surface is the
+// X11 window of the window's GtkDrawingArea, the same window the SDK's own Vulkan surface uses
+// (GTKWindow::CreateSurfaceImpl: gdk_x11_display_get_xdisplay / gdk_x11_window_get_xid of drawing_area_). GTK is
+// only used on the UI thread (StartRenderer); the handles are kept, and the size is asked through a private Xlib
+// connection, which any thread may use under its mutex.
+namespace {
+
+std::mutex g_window_mutex;
+Display *g_display = nullptr;  // GDK's connection (handed to plume for the surface)
+Window g_xid = 0;
+Display *g_size_display = nullptr;  // own connection for GetRenderWindowPixelSize
+
+GtkWidget *FindDrawingArea(GtkWidget *widget) {
+  if (GTK_IS_DRAWING_AREA(widget))
+    return widget;
+  if (!GTK_IS_CONTAINER(widget))
+    return nullptr;
+  GList *children = gtk_container_get_children(GTK_CONTAINER(widget));
+  GtkWidget *found = nullptr;
+  for (GList *it = children; it && !found; it = it->next)
+    found = FindDrawingArea(GTK_WIDGET(it->data));
+  g_list_free(children);
+  return found;
+}
+
+bool FindGameX11Window() {
+  if (g_xid)
+    return true;
+  GList *toplevels = gtk_window_list_toplevels();
+  for (GList *it = toplevels; it && !g_xid; it = it->next) {
+    GtkWidget *area = FindDrawingArea(GTK_WIDGET(it->data));
+    GdkWindow *gdk_window = area ? gtk_widget_get_window(area) : nullptr;
+    GdkDisplay *gdk_display = area ? gtk_widget_get_display(area) : nullptr;
+    if (!gdk_window || !gdk_display || !GDK_IS_X11_DISPLAY(gdk_display))
+      continue;
+    g_display = gdk_x11_display_get_xdisplay(gdk_display);
+    g_xid = gdk_x11_window_get_xid(gdk_window);
+  }
+  g_list_free(toplevels);
+  return g_xid != 0;
+}
+
+} // namespace
+
+bool GetNativeRenderWindow(plume::RenderWindow &out) {
+  std::lock_guard lock(g_window_mutex);
+  if (!FindGameX11Window()) {
+    RGPU_ERROR("No X11 GtkDrawingArea window for the Vulkan surface (GDK must use its X11 backend)");
+    return false;
+  }
+  out.display = g_display;
+  out.window = g_xid;
+  return true;
+}
+
+bool GetRenderWindowPixelSize(uint32_t &width, uint32_t &height) {
+  std::lock_guard lock(g_window_mutex);
+  if (!g_xid)
+    return false;
+  if (!g_size_display)
+    g_size_display = XOpenDisplay(DisplayString(g_display));
+  XWindowAttributes attributes{};
+  if (!g_size_display || !XGetWindowAttributes(g_size_display, g_xid, &attributes) || attributes.width <= 0 ||
+      attributes.height <= 0)
+    return false;
+  width = uint32_t(attributes.width);
+  height = uint32_t(attributes.height);
   return true;
 }
 

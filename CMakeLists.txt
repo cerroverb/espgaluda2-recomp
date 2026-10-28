@@ -50,6 +50,7 @@ set(ESPGALUDA2RECOMP_SOURCES
     src/latency_patch.cpp
     src/futari_capture.cpp
     src/futari_input_script.cpp
+    src/debug_xmem_trace.cpp
 )
 
 if(WIN32)

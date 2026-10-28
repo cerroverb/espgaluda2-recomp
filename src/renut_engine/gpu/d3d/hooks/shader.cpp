@@ -13,8 +13,10 @@
  * guest objects; the host side is kept per object address, keyed by the same
  * container hash.
  */
+#include <algorithm>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -24,6 +26,7 @@
 #include "renut_engine/gpu/banjo_renut_select.h"
 #include <rex/types.h>
 
+#include "renut_engine/gpu/d3d/d3d_native.h"  // espgaluda2-recomp: native::SetVertexDeclaration (SetFVF hook)
 #include "renut_engine/gpu/render/draw.h"
 #include "renut_engine/gpu/guest/guest_memory.h"
 #include "renut_engine/gpu/log.h"
@@ -34,6 +37,9 @@
 #include "renut_engine/gpu/backend/video.h"
 
 using namespace renut::gpu;
+
+// espgaluda2-recomp: the game's own D3DDevice_SetFVF (sub_8216A060), called by the SetFVF hook below.
+REX_IMPORT(__imp__sub_8216A060, OriginalSetFVF, void(u32, u32));
 
 namespace {
 
@@ -375,9 +381,9 @@ u32 D3DDevice_CreatePixelShader_hook(mapped_u32 function) {
 
 // D3DVertexDeclaration *D3DDevice_CreateVertexDeclaration(
 //     const D3DVERTEXELEMENT9 *pVertexElements) [0x8264EA90]
-u32 D3DDevice_CreateVertexDeclaration_hook(rex::MappedPtr<GuestVertexElement> elements) {
-  if (!elements)
-    return 0;
+// espgaluda2-recomp: the body of the hook below, also used for SetFVF's declarations (D3DDevice_SetFVF_hook below), whose
+// element copy has a count instead of the D3DDECL_END terminator.
+u32 CreateDeclarationRecord(const GuestVertexElement *element, u32 max_count) {
   auto *declaration = CreateRecord<VertexDeclarationRecord>(RecordKind::VertexDeclaration);
   if (!declaration)
     return 0;
@@ -385,11 +391,51 @@ u32 D3DDevice_CreateVertexDeclaration_hook(rex::MappedPtr<GuestVertexElement> el
       kCommonD3DCreated | u32(d3d::ResourceType::VertexDeclaration);
   declaration->x360.resource.ReferenceCount = 1u;
 
-  const GuestVertexElement *element = elements;
-  for (u32 i = 0; i < 64 && u32(element[i].Type) != kDeclTypeUnused; ++i)
+  for (u32 i = 0; i < max_count && u32(element[i].Type) != kDeclTypeUnused; ++i)
     declaration->elements.push_back(element[i]);
   BuildDeclarationLayout(*declaration);
   return declaration->self_va;
+}
+
+u32 D3DDevice_CreateVertexDeclaration_hook(rex::MappedPtr<GuestVertexElement> elements) {
+  if (!elements)
+    return 0;
+  return CreateDeclarationRecord(elements, 64);
+}
+
+// espgaluda2-recomp (original code, WORKLOG.md "Original code"; no reference project has a SetFVF hook):
+// void D3DDevice_SetFVF(D3DDevice*, DWORD FVF) [Espgaluda II sub_8216A060, docs/d3d/map_A.txt].
+// The game's sprite batcher (sub_820E41D0) sets an FVF before each DrawIndexedVertices. The XDK's SetFVF stores the
+// FVF at +12608, converts it (sub_82166630) into a declaration object inside the device at +12368 and makes that the
+// current declaration (+0x2ED8): a declaration the renderer never created, so its draws were dropped. The original
+// still runs (the device stays as the XDK expects); then the elements it built (count at +24 and the 12-byte
+// elements from +52 of that object, as D3DDevice_CreateVertexDeclaration's builder sub_821686A0 lays them out) become
+// a declaration record, one per FVF value, which is made current through the renderer's SetVertexDeclaration.
+constexpr u32 kDeviceOffsetFvfDeclaration = 12368;
+constexpr u32 kDeclarationOffsetCount = 24;
+constexpr u32 kDeclarationOffsetElements = 52;
+std::mutex g_fvf_mutex;
+std::unordered_map<u32, u32> g_fvf_declarations;  // FVF -> declaration record (kept for the session)
+
+void D3DDevice_SetFVF_hook(u32 device, u32 fvf) {
+  OriginalSetFVF(device, fvf);
+  const u32 object = device + kDeviceOffsetFvfDeclaration;
+  u32 record = 0;
+  {
+    std::lock_guard lock(g_fvf_mutex);
+    auto it = g_fvf_declarations.find(fvf);
+    if (it != g_fvf_declarations.end()) {
+      record = it->second;
+    } else {
+      const u32 count = u32(*GuestPtr<be_u32>(object + kDeclarationOffsetCount));
+      record = CreateDeclarationRecord(GuestPtr<GuestVertexElement>(object + kDeclarationOffsetElements),
+                                       std::min<u32>(count, 64));
+      if (record)
+        g_fvf_declarations.emplace(fvf, record);
+    }
+  }
+  if (record)
+    native::SetVertexDeclaration(native::DeviceAt(device), record);
 }
 
 // void D3DVertexShader_Bind(D3DVertexShader *pShader, DWORD Flags,
@@ -433,6 +479,7 @@ void D3DVertexShader_Bind_hook(u32 shader_va, u32 /*flags*/, u32 declaration_va,
 FUTARI_RENUT_HOOK(D3DDevice_CreateVertexShader, D3DDevice_CreateVertexShader_hook);  // N&B sub_8264E8B0
 FUTARI_RENUT_HOOK(D3DDevice_CreatePixelShader, D3DDevice_CreatePixelShader_hook);  // N&B sub_8264E6A8
 FUTARI_RENUT_HOOK(D3DDevice_CreateVertexDeclaration, D3DDevice_CreateVertexDeclaration_hook);  // N&B sub_8264EA90
+FUTARI_RENUT_HOOK(D3DDevice_SetFVF, D3DDevice_SetFVF_hook);  // espgaluda2-recomp
 FUTARI_RENUT_HOOK(D3DVertexShader_Bind, D3DVertexShader_Bind_hook);  // N&B sub_82657048
 FUTARI_RENUT_HOOK(XGRegisterVertexShader, XGRegisterVertexShader_hook);  // N&B sub_8264E7B8
 FUTARI_RENUT_HOOK(XGRegisterPixelShader, XGRegisterPixelShader_hook);  // N&B sub_8264E670
