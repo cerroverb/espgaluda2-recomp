@@ -52,6 +52,7 @@
 #endif
 #include "renut_engine/gpu/banjo_renut_record.h"  // banjo-nx (package 28b)
 #include <rex/cvar.h>
+#include <rex/frame_latency.h>  // espgaluda2-recomp: draw log by Swap
 
 // banjo-nx (2026-10-17, a diagnostic for the deko3d renderer's missing river water): draws that read memexport results
 // as vertices take them through the CPU path (wait for the export, read it back) instead of stream_convert_cs.
@@ -65,6 +66,9 @@ REXCVAR_DEFINE_STRING(banjo_renut_diag_stream_dump_vs, "", "Banjo/Renut",
 REXCVAR_DEFINE_INT32(banjo_renut_diag_draw_log_s, 0, "Banjo/Renut",
                      "Diagnostic: this many seconds after the first draw, log every draw of the next two frames "
                      "([drawlog]: shaders, counts, target, state; 0 = off)");
+REXCVAR_DEFINE_INT32(espgaluda2_draw_log_swap, 0, "Espgaluda2/Debug",
+                     "Diagnostic: log the draws of the game's Swaps N and N+1 (0 = off; banjo_renut_diag_draw_log_s by "
+                     "time otherwise)");
 REXCVAR_DEFINE_STRING(banjo_renut_diag_blend_skip_exclude, "", "Banjo/Renut",
                       "Diagnostic: pixel shader hashes (hex, comma separated) banjo_gpu_blend_skip leaves alone");
 
@@ -1916,6 +1920,9 @@ void PushSharedConstants(plume::RenderCommandList *cmd, const SharedConstants &s
 }
 #endif  // PLUME_DEKO3D
 
+// espgaluda2-recomp: texture slot 0's fetch constant of the draw being logged (filled where textures are bound).
+u32 g_drawlog_fetch0[6] = {};
+u32 g_drawlog_decl = 0;  // espgaluda2-recomp: the draw's declaration address (draw log)
 TextureFetch DeviceTextureFetch(const d3d::Device &dev, u32 r) {
   return TextureFetch::FromGuest(dev.m_Constants.TextureFetch[r]);
 }
@@ -1987,6 +1994,8 @@ void FillTextures(const GuestDevice &device, u32 fetch_mask, SharedConstants &sc
       continue;
     const TextureFetch fetch = DeviceTextureFetch(dev, r);
     const u32 texture_va = device.U32(d3d::kDeviceOffsetTextures + r * 4);
+    if (r == 0)  // espgaluda2-recomp: the draw log's texture 0 (diagnostic)
+      std::memcpy(g_drawlog_fetch0, fetch.dword, sizeof(g_drawlog_fetch0));
     const auto *header = texture_va ? GuestPtr<const d3d::BaseTexture>(texture_va) : nullptr;
     TextureSlotMemo &m =
         g_texture_slot_memo[((texture_va ^ (fetch.dword[0] * 0x85EBCA6Bu) ^ fetch.dword[1]) * 0x9E3779B1u) >> 23];
@@ -4025,6 +4034,28 @@ bool DrawsWithoutPixelShader(const GuestDevice &device, const Targets &t, const 
 void DrawLog(const DrawCall &call, const Geometry &geometry, const ShaderRecord *vs, const ShaderRecord *ps,
              const Targets &targets, const PipelineKey &key, const SharedConstants &sc, u32 export_count) {
   static const int32_t at = REXCVAR_GET(banjo_renut_diag_draw_log_s);
+  // espgaluda2-recomp: espgaluda2_draw_log_swap = N logs the draws of the game's Swaps N and N+1 (rex::latency
+  // SwapCount, the recorder's frame numbers) instead of banjo_renut_diag_draw_log_s.
+  static const int32_t at_swap = REXCVAR_GET(espgaluda2_draw_log_swap);
+  if (at_swap > 0) {
+    static uint32_t swap_ordinal = 0;
+    static uint64_t last_swap = 0;
+    const uint64_t swap = rex::latency::SwapCount();
+    if (swap < uint64_t(at_swap) || swap > uint64_t(at_swap) + 1)
+      return;
+    if (swap != last_swap) {
+      last_swap = swap;
+      swap_ordinal = 0;
+    }
+    const HostSurface *c0 = targets.color_count ? targets.colors[0] : nullptr;
+    RGPU_INFO("[drawlog] swap {} draw {}: vs {:016X} ps {:016X} prim {} count {} start {} base {} -> {} {} target {}x{} "
+              "decl {:08X} tex0 {:08X} {:08X} {:08X}",
+              swap, swap_ordinal++, vs ? vs->hash : 0, ps ? ps->hash : 0, call.primitive, call.count, call.start_index,
+              call.base_vertex, geometry.indexed ? "indices" : "vertices",
+              geometry.indexed ? geometry.index_count : geometry.vertex_count, c0 ? c0->width : 0, c0 ? c0->height : 0,
+              g_drawlog_decl, g_drawlog_fetch0[0], g_drawlog_fetch0[1], g_drawlog_fetch0[2]);
+    return;
+  }
   if (at <= 0)
     return;
   static const auto start = std::chrono::steady_clock::now();
@@ -4045,13 +4076,15 @@ void DrawLog(const DrawCall &call, const Geometry &geometry, const ShaderRecord 
   }
   const HostSurface *c0 = targets.color_count ? targets.colors[0] : nullptr;
   RGPU_INFO("[drawlog] frame {} draw {}: vs {:016X} ps {:016X} prim {} count {} -> {} {} inst {}{} target {}x{} fmt {} "
-            "x{} depth {} dc {:08X} blend {:08X} mask {:X} a2c {} vfetch {} bytes, exports {}",
+            "x{} depth {} dc {:08X} blend {:08X} mask {:X} a2c {} vfetch {} bytes, exports {} "
+            "tex0 {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
             frame, ordinal++, vs ? vs->hash : 0, ps ? ps->hash : 0, call.primitive, call.count,
             geometry.indexed ? "indices" : "vertices", geometry.indexed ? geometry.index_count : geometry.vertex_count,
             geometry.instance_count, call.tessellation ? " tess" : "", c0 ? c0->width : 0, c0 ? c0->height : 0,
             c0 ? int(c0->format) : -1, targets.color_count, targets.depth ? int(targets.depth->format) : -1,
             key.depth_control, key.blend_control[0], key.color_mask, key.alpha_to_coverage, sc.vertex_fetch_bytes,
-            export_count);
+            export_count, g_drawlog_fetch0[0], g_drawlog_fetch0[1], g_drawlog_fetch0[2], g_drawlog_fetch0[3],
+            g_drawlog_fetch0[4], g_drawlog_fetch0[5]);
 }
 
 #if defined(PLUME_DEKO3D)
@@ -4318,6 +4351,7 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
   const u32 vs_va = device.U32(d3d::kDeviceOffsetVertexShader);
   auto *vs = FindShaderLocked(vs_va, RecordKind::VertexShader);
   const u32 declaration_va = device.U32(d3d::kDeviceOffsetVertexDeclaration);
+  g_drawlog_decl = declaration_va;  // espgaluda2-recomp: draw log
   auto *ps = FindShaderLocked(device.U32(d3d::kDeviceOffsetPixelShader), RecordKind::PixelShader);
   // Without a declaration set, the shader fetches as D3DVertexShader_Bind
   // bound it, or else as its own vfetches describe (bundle meshes).
@@ -5060,7 +5094,8 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
   }
   // banjo-nx (2026-10-20, from sa2-nx, banjo_renut_lean_diagnostics): the draw log's check once, not a call per draw.
   static const bool draw_log = !REXCVAR_GET(banjo_renut_lean_diagnostics) ||
-                               REXCVAR_GET(banjo_renut_diag_draw_log_s) > 0;
+                               REXCVAR_GET(banjo_renut_diag_draw_log_s) > 0 ||
+                               REXCVAR_GET(espgaluda2_draw_log_swap) > 0;  // espgaluda2-recomp
   if (draw_log)
     DrawLog(call, geometry, vs, ps, targets, key, sc, export_count);
   // banjo-nx (2026-10-19, banjo_renut_resolve_skip): the targets this draw can write.

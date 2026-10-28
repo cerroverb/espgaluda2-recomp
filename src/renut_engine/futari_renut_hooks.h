@@ -817,7 +817,12 @@ extern "C" void futari_renut_entry_XGRegisterVertexShader(PPCContext& ctx, uint8
     if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DDevice_UnsetAll(ctx, base); return; } \
     __imp__sub_821700C8(ctx, base); \
   }
-#define FUTARI_RENUT_SITE_D3DIndexBuffer_Lock  // not in Espgaluda II's Direct3D (or not confirmed)
+#define FUTARI_RENUT_SITE_D3DIndexBuffer_Lock \
+  REX_EXTERN(__imp__sub_8216FDF0); \
+  extern "C" REX_FUNC(sub_8216FDF0) { \
+    if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DIndexBuffer_Lock(ctx, base); return; } \
+    __imp__sub_8216FDF0(ctx, base); \
+  }
 #define FUTARI_RENUT_SITE_D3DLineTexture_LockRect  // not in Espgaluda II's Direct3D (or not confirmed)
 #define FUTARI_RENUT_SITE_D3DResource_AddRef \
   REX_EXTERN(__imp__sub_8216ECF8); \
@@ -858,7 +863,12 @@ extern "C" void futari_renut_entry_XGRegisterVertexShader(PPCContext& ctx, uint8
     __imp__sub_82163160(ctx, base); \
   }
 #define FUTARI_RENUT_SITE_D3DTexture_GetSurfaceLevel  // not in Espgaluda II's Direct3D (or not confirmed)
-#define FUTARI_RENUT_SITE_D3DVertexBuffer_Lock  // not in Espgaluda II's Direct3D (or not confirmed)
+#define FUTARI_RENUT_SITE_D3DVertexBuffer_Lock \
+  REX_EXTERN(__imp__sub_8216FDA0); \
+  extern "C" REX_FUNC(sub_8216FDA0) { \
+    if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DVertexBuffer_Lock(ctx, base); return; } \
+    __imp__sub_8216FDA0(ctx, base); \
+  }
 #define FUTARI_RENUT_SITE_D3DVertexBuffer_Unlock \
   REX_EXTERN(__imp__sub_8216EF60); \
   extern "C" REX_FUNC(sub_8216EF60) { \
@@ -973,7 +983,12 @@ extern "C" void futari_renut_entry_XGRegisterVertexShader(PPCContext& ctx, uint8
   }
 #define FUTARI_RENUT_SITE_D3D_Lock3DSurface  // not in Espgaluda II's Direct3D (or not confirmed)
 #define FUTARI_RENUT_SITE_D3D_Lock3DSurface_Thunk  // not in Espgaluda II's Direct3D (or not confirmed)
-#define FUTARI_RENUT_SITE_D3D_LockResource  // not in Espgaluda II's Direct3D (or not confirmed)
+#define FUTARI_RENUT_SITE_D3D_LockResource \
+  REX_EXTERN(__imp__sub_8216F9D8); \
+  extern "C" REX_FUNC(sub_8216F9D8) { \
+    if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3D_LockResource(ctx, base); return; } \
+    __imp__sub_8216F9D8(ctx, base); \
+  }
 #define FUTARI_RENUT_SITE_D3D_LockSurface \
   REX_EXTERN(__imp__sub_821642A8); \
   extern "C" REX_FUNC(sub_821642A8) { \
