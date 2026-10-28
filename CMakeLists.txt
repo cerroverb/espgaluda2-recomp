@@ -23,7 +23,7 @@ if(NOT REXSDK_DIR)
         GIT_TAG ea1514977c45356038b40631c087021c2991fa47
         GIT_PROGRESS TRUE
         UPDATE_DISCONNECTED TRUE
-        PATCH_COMMAND git apply --whitespace=nowarn ${_sdk_patches}
+        PATCH_COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/sdk-patches -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patches.cmake
         # Only the SDK inside is used; don't add SDOJ's own project.
         SOURCE_SUBDIR _unused
     )
