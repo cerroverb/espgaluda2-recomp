@@ -14,10 +14,16 @@ foreach(_patch IN LISTS PATCHES)
     execute_process(COMMAND git apply --check --whitespace=nowarn "${_patch}"
                     RESULT_VARIABLE _applies OUTPUT_QUIET ERROR_QUIET)
     if(NOT _applies EQUAL 0)
-        # Applies neither way: applied earlier and overlapped by a later patch of the same files (0001 and 0005 both
-        # change graphics_system.cpp), so its reverse no longer matches either.
-        message(STATUS "applied earlier (a later patch overlaps it): ${_patch}")
-        continue()
+        # Applies neither way. Only one patch may: sdk-patches/0001, applied earlier and overlapped by 0005 (both
+        # change graphics_system.cpp), so its reverse no longer matches. Anything else is a real failure (a lenient
+        # rule here once let a broken 0006 through silently).
+        get_filename_component(_name "${_patch}" NAME)
+        if(_name STREQUAL "0001-display-timing-present-wait.patch")
+            message(STATUS "applied earlier (0005 overlaps it): ${_patch}")
+            continue()
+        endif()
+        message(FATAL_ERROR "${_patch} applies neither forward nor in reverse: the tree is in an unknown state "
+                            "(delete the fetched source under _deps to fetch it again)")
     endif()
     execute_process(COMMAND git apply --whitespace=nowarn "${_patch}" RESULT_VARIABLE _result)
     if(NOT _result EQUAL 0)
