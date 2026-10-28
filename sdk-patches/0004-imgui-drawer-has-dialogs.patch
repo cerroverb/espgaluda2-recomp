@@ -1,0 +1,16 @@
+# Backport to the SDOJ-bundled ReXGlue 0.8.0 of upstream rexglue-sdk commit fdc94c3 (ImGuiDrawer::HasDialogs),
+# github.com/rexglue/rexglue-sdk, BSD-3-Clause. Renut's overlay (app_integration.cpp) calls it.
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/imgui_drawer.h b/thirdparty/rexglue-sdk/include/rex/ui/imgui_drawer.h
+index 41c66104..2f42bfd7 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/imgui_drawer.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/imgui_drawer.h
+@@ -51,6 +51,9 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+   void AddDialog(ImGuiDialog* dialog);
+   void RemoveDialog(ImGuiDialog* dialog);
+ 
++  // Backport of upstream rexglue-sdk fdc94c3 ("add ImGuiDrawer::HasDialogs so callers can skip an empty draw").
++  bool HasDialogs() const { return !dialogs_.empty(); }
++
+   // SetPresenter may be called from the destructor.
+   void SetPresenter(Presenter* new_presenter);
+   void SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer);
