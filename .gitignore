@@ -15,6 +15,7 @@
 !/generated/
 !/sdk-patches/
 !/packaging/
+!/tools/
 
 *.xex
 *.iso
