@@ -13,9 +13,10 @@
 #include "renut_engine/gpu/banjo_renut_deko3d.h"  // futari-nx (peggle2-nx): MissingGameShaders
 #endif
 
-// espgaluda2-recomp: the choice is espgaluda2_renderer (futari-nx's futari_renderer, with "xenos" for the SDK's
+// espgaluda2-recomp: the choice is espgaluda2_renderer (default renut since it matched the emulated GPU on Novice
+// stage 1, WORKLOG.md; futari-nx's futari_renderer, with "xenos" for the SDK's
 // emulated Xenos GPU, the only other renderer this project has).
-REXCVAR_DEFINE_STRING(espgaluda2_renderer, "xenos", "Espgaluda2",
+REXCVAR_DEFINE_STRING(espgaluda2_renderer, "renut", "Espgaluda2",
                       "Renderer, chosen at boot. xenos = the SDK's emulated Xenos GPU (PM4 command stream, EDRAM, "
                       "runtime shader translation). renut = Renut's Direct3D-level renderer "
                       "(github.com/masterspike52/reNut by reNut and masterspike52, through banjo-nx and futari-nx): the "
