@@ -1,0 +1,35 @@
+diff --git a/app/thirdparty/plume/plume_volk_names.h b/app/thirdparty/plume/plume_volk_names.h
+index 5253eb1..1a14dcf 100644
+--- a/app/thirdparty/plume/plume_volk_names.h
++++ b/app/thirdparty/plume/plume_volk_names.h
+@@ -766,3 +766,16 @@
+ #define vkWaitSemaphoresKHR plume_vkWaitSemaphoresKHR
+ #define vkWriteAccelerationStructuresPropertiesKHR plume_vkWriteAccelerationStructuresPropertiesKHR
+ #define vkWriteMicromapsPropertiesEXT plume_vkWriteMicromapsPropertiesEXT
++
++// espgaluda2-recomp (renut-patches/0002): volk's own functions too. On Linux x86-64 the ReXGlue 0.8.0 SDK links its
++// volk statically into the same executable, so both copies of volk.c must have distinct names (PLUME_RENAME_VOLK).
++#define volkFinalize plume_volkFinalize
++#define volkGetInstanceVersion plume_volkGetInstanceVersion
++#define volkGetLoadedDevice plume_volkGetLoadedDevice
++#define volkGetLoadedInstance plume_volkGetLoadedInstance
++#define volkInitialize plume_volkInitialize
++#define volkInitializeCustom plume_volkInitializeCustom
++#define volkLoadDevice plume_volkLoadDevice
++#define volkLoadDeviceTable plume_volkLoadDeviceTable
++#define volkLoadInstance plume_volkLoadInstance
++#define volkLoadInstanceOnly plume_volkLoadInstanceOnly
+diff --git a/app/thirdparty/plume/plume_vulkan.h b/app/thirdparty/plume/plume_vulkan.h
+index 0101aa0..5e9c0eb 100644
+--- a/app/thirdparty/plume/plume_vulkan.h
++++ b/app/thirdparty/plume/plume_vulkan.h
+@@ -33,7 +33,8 @@
+ // For VK_KHR_portability_subset
+ #define VK_ENABLE_BETA_EXTENSIONS
+ 
+-#if defined(__SWITCH__)
++// espgaluda2-recomp (renut-patches/0002): also with PLUME_RENAME_VOLK (Linux, SDK with a static volk).
++#if defined(__SWITCH__) || defined(PLUME_RENAME_VOLK)
+ #include "plume_volk_names.h"
+ #endif
+ #include <volk.h>

@@ -1,0 +1,98 @@
+# espgaluda2-recomp: plume's SDL Vulkan path (PLUME_SDL_VULKAN_ENABLED, written for SDL2) in its SDL3 form, selected
+# with PLUME_SDL3_TARGET (headers only), for the ReXGlue SDK's SDL3 window (sdk-patches/0006): Wayland or X11.
+diff --git a/app/thirdparty/plume/CMakeLists.txt b/app/thirdparty/plume/CMakeLists.txt
+index 9b9ba24..c8591c0 100644
+--- a/app/thirdparty/plume/CMakeLists.txt
++++ b/app/thirdparty/plume/CMakeLists.txt
+@@ -36,7 +36,12 @@ if(WIN32)
+ endif()
+ 
+ # Enable SDL Vulkan support
+-if(PLUME_SDL_VULKAN_ENABLED)
++# espgaluda2-recomp (renut-patches/0003): PLUME_SDL3_TARGET names an SDL3 target the parent project already has
++# (the ReXGlue SDK's); plume's SDL path then uses SDL3 (PLUME_SDL3).
++set(PLUME_SDL3_TARGET "" CACHE STRING "An existing SDL3 target for the SDL Vulkan integration (SDL3 instead of SDL2)")
++if(PLUME_SDL_VULKAN_ENABLED AND PLUME_SDL3_TARGET)
++    set(SDL2_INCLUDE_DIRS "$<TARGET_PROPERTY:${PLUME_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>")
++elseif(PLUME_SDL_VULKAN_ENABLED)
+     if (NOT TARGET SDL2::SDL2)
+         find_package(SDL2 REQUIRED)
+     else()
+@@ -103,6 +108,11 @@ endif()
+ if(PLUME_SDL_VULKAN_ENABLED)
+     target_compile_definitions(plume PUBLIC PLUME_SDL_VULKAN_ENABLED)
+     target_include_directories(plume PUBLIC ${SDL2_INCLUDE_DIRS})
++    if(PLUME_SDL3_TARGET)
++        target_compile_definitions(plume PUBLIC PLUME_SDL3)
++        # Headers only: the parent's SDL3 instance (the SDK runtime's) provides the functions, so the window plume
++        # is given and the one SDL knows are the same; linking another static copy here would split them.
++    endif()
+ endif()
+ 
+ if(PLUME_D3D12_AGILITY_SDK_ENABLED)
+diff --git a/app/thirdparty/plume/plume_render_interface_types.h b/app/thirdparty/plume/plume_render_interface_types.h
+index aaa2e10..b0464f8 100644
+--- a/app/thirdparty/plume/plume_render_interface_types.h
++++ b/app/thirdparty/plume/plume_render_interface_types.h
+@@ -32,8 +32,13 @@
+ #endif
+ 
+ #ifdef PLUME_SDL_VULKAN_ENABLED
++#if defined(PLUME_SDL3)
++// espgaluda2-recomp (renut-patches/0003): SDL3 form of plume's SDL2 path (PLUME_SDL3), for the ReXGlue SDK's SDL3 window.
++#include <SDL3/SDL_vulkan.h>
++#else
+ #include <SDL_vulkan.h>
+ #endif
++#endif
+ 
+ namespace plume {
+ #if defined(__SWITCH__)
+diff --git a/app/thirdparty/plume/plume_vulkan.cpp b/app/thirdparty/plume/plume_vulkan.cpp
+index 8a20155..6bebc4e 100644
+--- a/app/thirdparty/plume/plume_vulkan.cpp
++++ b/app/thirdparty/plume/plume_vulkan.cpp
+@@ -2495,8 +2495,13 @@ namespace plume {
+         }
+ #   elif defined(PLUME_SDL_VULKAN_ENABLED)
+         VulkanInterface *renderInterface = commandQueue->device->renderInterface;
+-        SDL_bool sdlRes = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, &surface);
+-        if (sdlRes == SDL_FALSE) {
++#       if defined(PLUME_SDL3)
++        // espgaluda2-recomp (renut-patches/0003): SDL3's signature (allocator, bool result).
++        const bool sdlOk = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, nullptr, &surface);
++#       else
++        const bool sdlOk = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, &surface) != SDL_FALSE;
++#       endif
++        if (!sdlOk) {
+             fprintf(stderr, "SDL_Vulkan_CreateSurface failed with error %s.\n", SDL_GetError());
+             return;
+         }
+@@ -5447,6 +5452,19 @@ namespace plume {
+         // Push the extensions specified by SDL as required.
+         // SDL2 has this awkward requirement for the window to pull the extensions from. 
+         // This can be removed when upgrading to SDL3.
++#   if defined(PLUME_SDL3)
++// espgaluda2-recomp (renut-patches/0003): SDL3 form of plume's SDL2 path (PLUME_SDL3), for the ReXGlue SDK's SDL3 window.
++        // SDL3 needs no window for this.
++        (void)sdlWindow;
++        {
++            Uint32 sdlVulkanExtensionCount = 0;
++            if (char const *const *sdlVulkanExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlVulkanExtensionCount)) {
++                for (Uint32 i = 0; i < sdlVulkanExtensionCount; i++) {
++                    requiredExtensions.insert(sdlVulkanExtensions[i]);
++                }
++            }
++        }
++#   else
+         if (sdlWindow != nullptr) {
+             uint32_t sdlVulkanExtensionCount = 0;
+             if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &sdlVulkanExtensionCount, nullptr)) {
+@@ -5459,6 +5477,7 @@ namespace plume {
+                 }
+             }
+         }
++#   endif
+ #   endif
+ 
+         std::unordered_set<std::string> missingRequiredExtensions = requiredExtensions;
