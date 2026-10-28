@@ -3,7 +3,7 @@
 # SDK boilerplate lives in generated/rexglue.cmake.
 
 cmake_minimum_required(VERSION 3.25)
-project(espgaluda2_recomp LANGUAGES CXX)
+project(espgaluda2_recomp LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,9 +34,19 @@ endif()
 
 include(generated/rexglue.cmake)
 
+# extract-xiso, run on first launch to extract an ISO into game_data.
+include(FetchContent)
+FetchContent_Declare(extract_xiso
+    GIT_REPOSITORY https://github.com/XboxDev/extract-xiso.git
+    GIT_TAG 3f5b62cfe68f000b0e3c8a30104973f3a297948e
+    GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(extract_xiso)
+
 # Sources
 set(ESPGALUDA2RECOMP_SOURCES
     src/main.cpp
+    src/game_setup.cpp
     src/latency_patch.cpp
 )
 
@@ -61,3 +71,15 @@ if(NOT WIN32)
         VERBATIM
     )
 endif()
+
+# Stage extract-xiso and its license in tools/extract-xiso beside the executable.
+set(_extract_xiso_dir "$<TARGET_FILE_DIR:espgaluda2_recomp>/tools/extract-xiso")
+add_custom_target(stage_extract_xiso ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_extract_xiso_dir}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:extract-xiso>" "${_extract_xiso_dir}/$<TARGET_FILE_NAME:extract-xiso>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${extract_xiso_SOURCE_DIR}/LICENSE.TXT" "${_extract_xiso_dir}/LICENSE.TXT"
+    VERBATIM
+)
+add_dependencies(stage_extract_xiso extract-xiso espgaluda2_recomp)

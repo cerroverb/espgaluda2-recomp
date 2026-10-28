@@ -7,8 +7,13 @@
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/rex_app.h>
+#include <rex/system.h>
 
 #include <filesystem>
+#include <functional>
+#include <optional>
+
+#include "game_setup.h"
 
 class Espgaluda2RecompApp : public rex::ReXApp {
  public:
@@ -35,4 +40,38 @@ class Espgaluda2RecompApp : public rex::ReXApp {
       }
     }
   }
+
+  // Uses the extracted game in game_data (or a single game folder inside it).
+  // If there is none, extracts the .iso beside the game into game_data first.
+  std::optional<rex::PathConfig> OnFinalizePaths(
+      const rex::PathConfig& defaults,
+      std::function<void(rex::PathConfig)> resume) override {
+    if (auto folder = game_setup::FindGameFolder(defaults.game_data_root)) {
+      auto paths = defaults;
+      paths.game_data_root = *folder;
+      return paths;
+    }
+    installer_.Start(
+        app_context(), imgui_drawer(), rex::filesystem::GetExecutableFolder(),
+        defaults.game_data_root,
+        [this, defaults, resume = std::move(resume)](bool ok, const std::string& error) {
+          if (ok) {
+            if (auto folder = game_setup::FindGameFolder(defaults.game_data_root)) {
+              auto paths = defaults;
+              paths.game_data_root = *folder;
+              resume(paths);
+              return;
+            }
+          }
+          rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error,
+                                    ok ? "The extracted game files were not found." : error);
+          app_context().QuitFromUIThread();
+        });
+    return std::nullopt;
+  }
+
+  void OnShutdown() override { installer_.Stop(); }
+
+ private:
+  game_setup::IsoInstaller installer_;
 };

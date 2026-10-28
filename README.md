@@ -20,16 +20,19 @@ No game data is included. You need your own dump of the game.
 ## Requirements
 
 - An x86-64 Linux system with a Vulkan GPU driver (Mesa RADV/ANV, or NVIDIA).
-- An extracted dump of Espgaluda II Black Label (Xbox 360). The folder must
-  contain `default.xex`, `dat00.xex` ... `dat164.xex` and the `res` folder.
-  To extract an ISO, use [extract-xiso](https://github.com/XboxDev/extract-xiso):
-  `extract-xiso -x game.iso`.
+- Your own copy of Espgaluda II Black Label (Xbox 360), either as an `.iso`
+  or as extracted files (`default.xex`, `dat00.xex` ... `dat164.xex` and the
+  `res` folder).
 
 ## Install
 
 1. Download `espgaluda2-recomp-linux-amd64.tar.gz` from Releases and unpack it.
-2. Copy the contents of the extracted game folder into `game_data` (or replace
-   `game_data` with a symlink to the folder).
+2. Add the game, one of two ways:
+   - **ISO:** put the `.iso` next to `espgaluda2-recomp.sh`. The first launch
+     extracts it into `game_data` (takes a few seconds), after which the ISO
+     can be deleted.
+   - **Extracted files:** copy them into `game_data`, or make `game_data` a
+     symlink to the folder.
 3. Run `espgaluda2-recomp.sh`. For Steam, add it as a non-Steam game.
 
 Saves and settings are written to `user_data` beside the executable.
@@ -84,5 +87,5 @@ target.
 ## License
 
 The code in this repository is under the BSD 3-Clause license (see LICENSE).
-The ReXGlue SDK and Xenia carry their own licenses.
+The ReXGlue SDK, Xenia and extract-xiso (bundled in `tools/`) carry their own licenses.
 Espgaluda II is a trademark of CAVE. This project is not affiliated with CAVE.
