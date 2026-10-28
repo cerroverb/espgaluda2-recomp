@@ -1,0 +1,653 @@
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/device.h b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/device.h
+index 947817fe..75649386 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/device.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/device.h
+@@ -168,6 +168,11 @@ class VulkanDevice {
+     // VK_EXT_robustness2
+ 
+     bool nullDescriptor = false;
++
++    // VK_KHR_present_id, VK_KHR_present_wait
++
++    bool presentId = false;
++    bool presentWait = false;
+   };
+ 
+   // Properties of the core API and enabled extensions, and enabled features.
+@@ -199,6 +204,10 @@ class VulkanDevice {
+     bool ext_1_3_KHR_maintenance4 = false;  // #414
+     // Has optional features not implied by this being true.
+     bool ext_1_3_KHR_dynamic_rendering = false;  // #55
++    // Has optional features not implied by this being true.
++    bool ext_KHR_present_wait = false;  // #249
++    // Has optional features not implied by this being true.
++    bool ext_KHR_present_id = false;  // #295
+   };
+ 
+   const Extensions& extensions() const { return extensions_; }
+@@ -212,6 +221,8 @@ class VulkanDevice {
+ #include <rex/ui/vulkan/functions/device_1_0.inc>
+     // VK_KHR_swapchain (#2)
+ #include <rex/ui/vulkan/functions/device_khr_swapchain.inc>
++    // VK_KHR_present_wait (#249)
++#include <rex/ui/vulkan/functions/device_khr_present_wait.inc>
+     // VK_KHR_get_memory_requirements2 (#147, promoted to 1.1)
+ #include <rex/ui/vulkan/functions/device_1_1_khr_get_memory_requirements2.inc>
+     // VK_KHR_bind_memory2 (#158, promoted to 1.1)
+diff --git a/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp b/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
+index 4ede683c..61d48b94 100644
+--- a/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
++++ b/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
+@@ -16,7 +16,9 @@
+ #include <cstdint>
+ #include <functional>
+ #include <memory>
++#include <cmath>
+ #include <mutex>
++#include <thread>
+ #include <utility>
+ 
+ #include <rex/cvar.h>
+@@ -27,6 +29,7 @@
+ #include <rex/stream.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xthread.h>
++#include <rex/ui/display_timing.h>
+ #include <rex/ui/graphics_provider.h>
+ #include <rex/ui/window.h>
+ #include <rex/ui/windowed_app_context.h>
+@@ -43,8 +46,126 @@ REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+                     "Store shaders persistently and load them when loading games to avoid "
+                     "runtime spikes and freezes when playing the game not for the first time.");
+ 
++REXCVAR_DEFINE_BOOL(vsync_display_lock, false, "GPU",
++                    "Lock the guest vblank phase to when frames are shown on the display, so "
++                    "flips land just before a refresh (needs present wait and a queued present "
++                    "mode; falls back to the plain timer otherwise)");
++
+ namespace {
+ 
++// Phase lock of the guest vblank timer to the display refresh.
++//
++// Each sample is d = time from queueing a present to it being shown. With a
++// queued present mode, d is how long the frame waited for the next refresh
++// (plus compositor time). The timer phase is nudged so d settles at a small
++// margin: the flip then happens just before a refresh. The error is taken
++// modulo one guest frame, so a frame that just missed a refresh shows up as a
++// small error and raises the margin instead of causing a large jump.
++class DisplayVblankLock {
++ public:
++  explicit DisplayVblankLock(double frame_ms) : frame_ms_(frame_ms) {}
++
++  // Returns milliseconds to move the next vblank by (positive = later). With
++  // apply false it only observes and logs, for comparing with the lock off.
++  double Update(bool apply) {
++    applying_ = apply;
++    const double adjust = Observe();
++    return apply ? adjust : 0.0;
++  }
++
++ private:
++  double Observe() {
++    namespace dt = rex::ui::display_timing;
++    if (disabled_) {
++      return 0.0;
++    }
++    if (!dt::IsQueuedPresentMode()) {
++      locked_ = false;
++      good_samples_ = 0;
++      return 0.0;
++    }
++    const dt::Sample sample = dt::Latest();
++    if (sample.sequence == last_sequence_) {
++      return 0.0;
++    }
++    last_sequence_ = sample.sequence;
++    const double d = double(sample.shown_ns - sample.submit_ns) / 1e6;
++    if (d < 0.0 || d > 4.0 * frame_ms_) {
++      return 0.0;
++    }
++    ++samples_;
++    d_sum_ += d;
++
++    double e = d - margin_ms_;
++    bool late = false;
++    if (e > 0.5 * frame_ms_) {
++      // Shown a refresh later than aimed for: a missed refresh while locked,
++      // otherwise simply the shorter way round.
++      e -= frame_ms_;
++      late = locked_;
++    }
++    if (late) {
++      ++late_samples_;
++      if (margin_ms_ < kMaxMarginMs) {
++        margin_ms_ = std::min(kMaxMarginMs, margin_ms_ + 0.5);
++        REXLOG_INFO("vsync_display_lock: missed a refresh, margin now {:.2f} ms", margin_ms_);
++      }
++      stable_samples_ = 0;
++    }
++
++    const double adjust = std::clamp(e * kGain, -kMaxStepMs, kMaxStepMs);
++
++    if (std::abs(e) < 1.0) {
++      if (!locked_ && ++good_samples_ >= 30) {
++        locked_ = true;
++        REXLOG_INFO("vsync_display_lock: locked to the display, margin {:.2f} ms", margin_ms_);
++      }
++      if (locked_ && ++stable_samples_ >= 1800 && margin_ms_ > kMinMarginMs) {
++        margin_ms_ = std::max(kMinMarginMs, margin_ms_ - 0.25);
++        stable_samples_ = 0;
++      }
++    } else if (!late) {
++      good_samples_ = 0;
++    }
++    if (!locked_ && samples_ >= 600 && !ever_locked_) {
++      disabled_ = true;
++      REXLOG_WARN(
++          "vsync_display_lock: no stable lock after {} frames (variable or non-multiple refresh "
++          "rate?), using the plain timer",
++          samples_);
++      return 0.0;
++    }
++    ever_locked_ |= locked_;
++
++    if (samples_ % 600 == 0) {
++      REXLOG_INFO(
++          "vsync_display_lock: {} frames, applied={}, locked={}, mean present-to-shown {:.2f} "
++          "ms, margin {:.2f} ms, missed refreshes {}",
++          samples_, applying_, locked_, d_sum_ / 600.0, margin_ms_, late_samples_);
++      d_sum_ = 0.0;
++    }
++    return adjust;
++  }
++
++  static constexpr double kGain = 0.2;
++  static constexpr double kMaxStepMs = 0.25;
++  static constexpr double kMinMarginMs = 1.5;
++  static constexpr double kMaxMarginMs = 8.0;
++
++  double frame_ms_;
++  double margin_ms_ = 3.0;
++  double d_sum_ = 0.0;
++  uint64_t last_sequence_ = 0;
++  uint64_t samples_ = 0;
++  uint64_t late_samples_ = 0;
++  uint32_t good_samples_ = 0;
++  uint32_t stable_samples_ = 0;
++  bool locked_ = false;
++  bool ever_locked_ = false;
++  bool disabled_ = false;
++  bool applying_ = false;
++};
++
+ rex::graphics::CommandProcessor::SwapPostEffect ParseSwapPostEffect(
+     const std::string& effect_name) {
+   std::string lowered = effect_name;
+@@ -150,7 +271,10 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
+                                  reinterpret_cast<runtime::MMIOReadCallback>(ReadRegisterThunk),
+                                  reinterpret_cast<runtime::MMIOWriteCallback>(WriteRegisterThunk));
+ 
+-  // Guest vblank timer based on the configured guest video mode.
++  // Guest vblank timer based on the configured guest video mode. With
++  // vsync_display_lock, its phase follows when presented frames are actually
++  // shown (rex/ui/display_timing.h), so the flip lands just before a display
++  // refresh instead of at a random point between two.
+   vsync_worker_running_ = true;
+   vsync_worker_thread_ = system::object_ref<system::XHostThread>(
+       new system::XHostThread(kernel_state_, 128 * 1024, 0x20, [this]() {
+@@ -160,18 +284,37 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
+         uint64_t guest_tick_frequency = chrono::Clock::guest_tick_frequency();
+         uint64_t vsync_interval_ticks =
+             std::max(uint64_t(1), uint64_t(double(guest_tick_frequency) / refresh_rate_hz));
++        DisplayVblankLock display_lock(1000.0 / refresh_rate_hz);
++        const double ticks_per_ms = double(guest_tick_frequency) / 1000.0;
+         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
+         while (vsync_worker_running_) {
++          {
++            // Positive delays the next vblank, negative brings it forward.
++            const double adjust_ms = display_lock.Update(REXCVAR_GET(vsync_display_lock));
++            if (adjust_ms != 0.0) {
++              last_frame_time += uint64_t(int64_t(adjust_ms * ticks_per_ms));
++            }
++          }
+           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
+-          if (current_time - last_frame_time >= vsync_interval_ticks) {
++          if (int64_t(current_time - last_frame_time) >= int64_t(vsync_interval_ticks)) {
+             MarkVblank();
+             if (current_time - last_frame_time >= vsync_interval_ticks * 2) {
+               last_frame_time = current_time;
+             } else {
+               last_frame_time += vsync_interval_ticks;
+             }
++            continue;
++          }
++          // Sleep in finer steps near the deadline so the phase is kept to a
++          // fraction of a millisecond.
++          const int64_t remaining_ticks =
++              int64_t(last_frame_time + vsync_interval_ticks - current_time);
++          const double remaining_ms = double(remaining_ticks) / ticks_per_ms;
++          if (remaining_ms > 1.5) {
++            rex::thread::Sleep(std::chrono::milliseconds(1));
++          } else {
++            std::this_thread::sleep_for(std::chrono::microseconds(100));
+           }
+-          rex::thread::Sleep(std::chrono::milliseconds(1));
+         }
+         return 0;
+       }));
+diff --git a/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt b/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
+index 18ad4ad0..ad500291 100644
+--- a/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
++++ b/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
+@@ -9,6 +9,7 @@ set(REXUI_CORE_SOURCES
+     immediate_drawer.cpp
+     keybinds.cpp
+     menu_item.cpp
++    display_timing.cpp
+     presenter.cpp
+     renderdoc_api.cpp
+     window.cpp
+diff --git a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_device.cpp b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_device.cpp
+index c6f48fd8..7992106a 100644
+--- a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_device.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_device.cpp
+@@ -198,6 +198,11 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+   if (with_swapchain) {
+     // #2.
+     XE_UI_VULKAN_STRUCT_EXTENSION(KHR_swapchain)
++    if (get_physical_device_properties2_supported) {
++      // #295 and #249, for the display-locked guest vblank.
++      XE_UI_VULKAN_STRUCT_EXTENSION(KHR_present_id)
++      XE_UI_VULKAN_STRUCT_EXTENSION(KHR_present_wait)
++    }
+   }
+ 
+   bool ext_1_2_KHR_sampler_mirror_clamp_to_edge = false;
+@@ -332,6 +337,12 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+   VulkanFeatures<VkPhysicalDeviceRobustness2FeaturesEXT,
+                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT>
+       features_EXT_robustness2;
++  VulkanFeatures<VkPhysicalDevicePresentIdFeaturesKHR,
++                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR>
++      features_KHR_present_id;
++  VulkanFeatures<VkPhysicalDevicePresentWaitFeaturesKHR,
++                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR>
++      features_KHR_present_wait;
+ 
+   if (get_physical_device_properties2_supported) {
+     if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+@@ -373,6 +384,12 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     if (device->extensions_.ext_EXT_robustness2) {
+       features_EXT_robustness2.Link(supported_features_2, device_create_info);
+     }
++    if (device->extensions_.ext_KHR_present_id) {
++      features_KHR_present_id.Link(supported_features_2, device_create_info);
++    }
++    if (device->extensions_.ext_KHR_present_wait) {
++      features_KHR_present_wait.Link(supported_features_2, device_create_info);
++    }
+     ifn.vkGetPhysicalDeviceProperties2(physical_device, &properties_2);
+     ifn.vkGetPhysicalDeviceFeatures2(physical_device, &supported_features_2);
+   }
+@@ -727,6 +744,12 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     }
+   }
+ 
++  // Present wait needs both features (and VK_KHR_present_id enabled).
++  if (device->extensions_.ext_KHR_present_id && device->extensions_.ext_KHR_present_wait) {
++    XE_UI_VULKAN_FEATURE_2(features_KHR_present_id, presentId)
++    XE_UI_VULKAN_FEATURE_2(features_KHR_present_wait, presentWait)
++  }
++
+ #undef XE_UI_VULKAN_LIMIT
+ #undef XE_UI_VULKAN_ENUM_LIMIT
+ #undef XE_UI_VULKAN_FEATURE
+@@ -798,6 +821,9 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+   if (device->extensions_.ext_KHR_swapchain) {
+ #include <rex/ui/vulkan/functions/device_khr_swapchain.inc>
+   }
++  if (device->extensions_.ext_KHR_present_wait) {
++#include <rex/ui/vulkan/functions/device_khr_present_wait.inc>
++  }
+ #undef XE_UI_VULKAN_FUNCTION_PROMOTED
+ 
+ #undef XE_UI_VULKAN_FUNCTION
+diff --git a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp
+index 30bafbaf..aa2ad82d 100644
+--- a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp
+@@ -19,11 +19,17 @@
+ #include <utility>
+ #include <vector>
+ 
++#include <chrono>
++#include <condition_variable>
++#include <mutex>
++#include <thread>
++
+ #include <rex/assert.h>
+ #include <rex/cvar.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+ #include <rex/platform.h>
++#include <rex/ui/display_timing.h>
+ #include <rex/ui/vulkan/presenter.h>
+ #include <rex/ui/vulkan/util.h>
+ 
+@@ -55,10 +61,157 @@ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, true, "UI/Vulkan",
+ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, true, "UI/Vulkan",
+                     "Allow FIFO relaxed present mode");
+ 
++REXCVAR_DEFINE_BOOL(vulkan_present_wait, true, "UI/Vulkan",
++                    "Report when presented frames are shown (VK_KHR_present_wait), used by "
++                    "vsync_display_lock");
++
+ namespace rex {
+ namespace ui {
+ namespace vulkan {
+ 
++namespace {
++
++// Observes when queued presents are actually shown and publishes the timing
++// for the guest vblank lock (rex/ui/display_timing.h).
++//
++// vkWaitForPresentKHR and vkQueuePresentKHR both need external synchronization
++// of the swapchain, and blocking in the wait would hold up the next present.
++// So the wait is polled with a zero timeout under the present queue's
++// acquisition, a fraction of a millisecond apart.
++class PresentWaiter {
++ public:
++  static PresentWaiter& Get() {
++    static PresentWaiter instance;
++    return instance;
++  }
++
++  ~PresentWaiter() { Stop(); }
++
++  void Enqueue(const VulkanDevice* device, uint32_t queue_family, VkSwapchainKHR swapchain,
++               uint64_t present_id, int64_t submit_ns) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (disabled_) {
++      return;
++    }
++    pending_ = {device, queue_family, swapchain, present_id, submit_ns, generation_, true};
++    if (!thread_.joinable()) {
++      stop_ = false;
++      thread_ = std::thread([this]() { Run(); });
++    }
++    cv_.notify_one();
++  }
++
++  // Called before a swapchain is destroyed or retired. Waits for an in-flight
++  // poll to finish, so the swapchain is never used after this returns.
++  void ForgetSwapchains() {
++    std::lock_guard<std::mutex> poll_lock(poll_mutex_);
++    std::lock_guard<std::mutex> lock(mutex_);
++    ++generation_;
++    pending_.valid = false;
++  }
++
++  void Stop() {
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      stop_ = true;
++      pending_.valid = false;
++      cv_.notify_all();
++    }
++    if (thread_.joinable()) {
++      thread_.join();
++    }
++  }
++
++ private:
++  struct Pending {
++    const VulkanDevice* device = nullptr;
++    uint32_t queue_family = UINT32_MAX;
++    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
++    uint64_t present_id = 0;
++    int64_t submit_ns = 0;
++    uint64_t generation = 0;
++    bool valid = false;
++  };
++
++  static constexpr int64_t kPollIntervalNs = 200000;   // 0.2 ms
++  static constexpr int64_t kGiveUpNs = 100000000;      // 100 ms per present
++  static constexpr uint32_t kMaxConsecutiveFailures = 120;
++
++  void Run() {
++    uint32_t consecutive_failures = 0;
++    while (true) {
++      Pending item;
++      {
++        std::unique_lock<std::mutex> lock(mutex_);
++        cv_.wait(lock, [this]() { return stop_ || pending_.valid; });
++        if (stop_) {
++          return;
++        }
++        item = pending_;
++        pending_.valid = false;
++      }
++      const VulkanDevice::Functions& dfn = item.device->functions();
++      bool shown = false;
++      bool failed = false;
++      while (true) {
++        VkResult result;
++        {
++          std::lock_guard<std::mutex> poll_lock(poll_mutex_);
++          {
++            std::lock_guard<std::mutex> lock(mutex_);
++            // A mailbox may replace this image, so it may never be shown:
++            // move on to the newest present once there is one.
++            if (stop_ || item.generation != generation_ || pending_.valid) {
++              break;
++            }
++          }
++          const VulkanDevice::Queue::Acquisition queue_acquisition =
++              item.device->AcquireQueue(item.queue_family, 0);
++          result = dfn.vkWaitForPresentKHR(item.device->device(), item.swapchain,
++                                           item.present_id, 0);
++        }
++        const int64_t now_ns = display_timing::NowNs();
++        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
++          display_timing::Publish(item.submit_ns, now_ns);
++          shown = true;
++          break;
++        }
++        if (result != VK_TIMEOUT) {
++          // Only real errors count; an outdated swapchain is being replaced.
++          failed = result != VK_ERROR_OUT_OF_DATE_KHR && result != VK_ERROR_SURFACE_LOST_KHR;
++          break;
++        }
++        if (now_ns - item.submit_ns > kGiveUpNs) {
++          // Not shown in time (window hidden, display off): skip, not an error.
++          break;
++        }
++        std::this_thread::sleep_for(std::chrono::nanoseconds(kPollIntervalNs));
++      }
++      if (shown) {
++        consecutive_failures = 0;
++      } else if (failed && ++consecutive_failures >= kMaxConsecutiveFailures) {
++        REXLOG_WARN("VulkanPresenter: present wait keeps failing, display timing disabled");
++        std::lock_guard<std::mutex> lock(mutex_);
++        disabled_ = true;
++        return;
++      }
++    }
++  }
++
++  std::mutex mutex_;       // pending_, generation_, stop_, disabled_
++  std::mutex poll_mutex_;  // held while the swapchain is used by a poll
++  std::condition_variable cv_;
++  std::thread thread_;
++  Pending pending_;
++  uint64_t generation_ = 1;
++  bool stop_ = false;
++  bool disabled_ = false;
++};
++
++std::atomic<uint64_t> g_next_present_id{1};
++
++}  // namespace
++
+ #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
+ namespace {
+ 
+@@ -187,6 +340,9 @@ bool VulkanPresenter::PaintContext::Submission::Initialize() {
+ }
+ 
+ VulkanPresenter::~VulkanPresenter() {
++  PresentWaiter::Get().Stop();
++  display_timing::SetQueuedPresentMode(false);
++
+   // Destroy the swapchain after its images are not used for drawing anymore.
+   // This is a confusing part in Vulkan, as vkQueuePresentKHR doesn't signal a
+   // fence clearly indicating when it's safe to destroy a swapchain, so we
+@@ -1388,10 +1544,14 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+   image_extent_out = swapchain_create_info.imageExtent;
+   is_fifo_out = swapchain_create_info.presentMode == VK_PRESENT_MODE_FIFO_KHR ||
+                 swapchain_create_info.presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
++  display_timing::SetQueuedPresentMode(swapchain_create_info.presentMode !=
++                                       VK_PRESENT_MODE_IMMEDIATE_KHR);
+   return swapchain;
+ }
+ 
+ VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
++  // No present wait may use the swapchain after this.
++  PresentWaiter::Get().ForgetSwapchains();
+   if (swapchain != VK_NULL_HANDLE) {
+     submission_tracker.AwaitAllSubmissionsCompletion();
+   }
+@@ -2202,12 +2362,32 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+   present_info.pSwapchains = &paint_context_.swapchain;
+   present_info.pImageIndices = &swapchain_image_index;
+   present_info.pResults = nullptr;
++  // Present ids let the waiter observe when this image is actually shown.
++  const VulkanDevice::Properties& device_properties = vulkan_device_->properties();
++  const bool use_present_wait = REXCVAR_GET(vulkan_present_wait) &&
++                                device_properties.presentId && device_properties.presentWait &&
++                                dfn.vkWaitForPresentKHR != nullptr;
++  const uint64_t present_id =
++      use_present_wait ? g_next_present_id.fetch_add(1, std::memory_order_relaxed) : 0;
++  VkPresentIdKHR present_id_info = {VK_STRUCTURE_TYPE_PRESENT_ID_KHR};
++  if (use_present_wait) {
++    present_id_info.swapchainCount = 1;
++    present_id_info.pPresentIds = &present_id;
++    present_info.pNext = &present_id_info;
++  }
+   VkResult present_result;
++  int64_t present_submit_ns;
+   {
+     const VulkanDevice::Queue::Acquisition queue_acquisition =
+         vulkan_device_->AcquireQueue(paint_context_.present_queue_family, 0);
++    present_submit_ns = display_timing::NowNs();
+     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
+   }
++  if (use_present_wait &&
++      (present_result == VK_SUCCESS || present_result == VK_SUBOPTIMAL_KHR)) {
++    PresentWaiter::Get().Enqueue(vulkan_device_, paint_context_.present_queue_family,
++                                 paint_context_.swapchain, present_id, present_submit_ns);
++  }
+   switch (present_result) {
+     case VK_SUCCESS:
+       return PaintResult::kPresented;
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/display_timing.h b/thirdparty/rexglue-sdk/include/rex/ui/display_timing.h
+new file mode 100644
+index 00000000..d6bf6269
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/include/rex/ui/display_timing.h
+@@ -0,0 +1,36 @@
++/**
++ ******************************************************************************
++ * ReXGlue: when presented guest frames were actually shown on the display.   *
++ ******************************************************************************
++ * Published by the presenter (VK_KHR_present_wait) and read by the guest      *
++ * vblank timer to lock its phase to the display's refresh.                    *
++ ******************************************************************************
++ */
++
++#pragma once
++
++#include <cstdint>
++
++namespace rex::ui::display_timing {
++
++struct Sample {
++  // Incremented for every published sample, 0 if none yet.
++  uint64_t sequence = 0;
++  // Steady clock nanoseconds when the image was queued for presentation.
++  int64_t submit_ns = 0;
++  // Steady clock nanoseconds when the image was observed as shown.
++  int64_t shown_ns = 0;
++};
++
++int64_t NowNs();
++
++// Whether the current swapchain queues images to the display's refresh (FIFO,
++// FIFO relaxed or mailbox). Immediate presentation has no refresh grid to lock
++// to, and samples are not meaningful for the vblank lock then.
++void SetQueuedPresentMode(bool queued);
++bool IsQueuedPresentMode();
++
++void Publish(int64_t submit_ns, int64_t shown_ns);
++Sample Latest();
++
++}  // namespace rex::ui::display_timing
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/functions/device_khr_present_wait.inc b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/functions/device_khr_present_wait.inc
+new file mode 100644
+index 00000000..f8d42982
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/functions/device_khr_present_wait.inc
+@@ -0,0 +1,2 @@
++// VK_KHR_present_wait functions used for display-locked guest vblank.
++XE_UI_VULKAN_FUNCTION(vkWaitForPresentKHR)
+diff --git a/thirdparty/rexglue-sdk/src/ui/display_timing.cpp b/thirdparty/rexglue-sdk/src/ui/display_timing.cpp
+new file mode 100644
+index 00000000..8f0569d7
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/src/ui/display_timing.cpp
+@@ -0,0 +1,45 @@
++/**
++ ******************************************************************************
++ * ReXGlue: when presented guest frames were actually shown on the display.   *
++ ******************************************************************************
++ */
++
++#include <rex/ui/display_timing.h>
++
++#include <atomic>
++#include <chrono>
++#include <mutex>
++
++namespace rex::ui::display_timing {
++
++namespace {
++std::mutex sample_mutex;
++Sample latest_sample;
++std::atomic<bool> queued_present_mode{false};
++}  // namespace
++
++int64_t NowNs() {
++  return std::chrono::duration_cast<std::chrono::nanoseconds>(
++             std::chrono::steady_clock::now().time_since_epoch())
++      .count();
++}
++
++void SetQueuedPresentMode(bool queued) {
++  queued_present_mode.store(queued, std::memory_order_release);
++}
++
++bool IsQueuedPresentMode() { return queued_present_mode.load(std::memory_order_acquire); }
++
++void Publish(int64_t submit_ns, int64_t shown_ns) {
++  std::lock_guard<std::mutex> lock(sample_mutex);
++  ++latest_sample.sequence;
++  latest_sample.submit_ns = submit_ns;
++  latest_sample.shown_ns = shown_ns;
++}
++
++Sample Latest() {
++  std::lock_guard<std::mutex> lock(sample_mutex);
++  return latest_sample;
++}
++
++}  // namespace rex::ui::display_timing

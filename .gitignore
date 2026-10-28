@@ -1,0 +1,22 @@
+# Allowlist: everything is ignored unless listed below. Game files (.xex,
+# .iso), logs, traces and build output must never be committed.
+/*
+!/.gitignore
+!/.gitattributes
+!/.github/
+!/CMakeLists.txt
+!/CMakePresets.json
+!/README.md
+!/LICENSE
+!/build.sh
+!/espgaluda2_recomp_manifest.toml
+!/espgaluda2_recomp*_functions.toml
+!/src/
+!/generated/
+!/sdk-patches/
+!/packaging/
+
+*.xex
+*.iso
+*.log
+*.bak*
