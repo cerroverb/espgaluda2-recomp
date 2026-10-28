@@ -9,6 +9,8 @@
 #include <rex/filesystem.h>
 #include <rex/rex_app.h>
 #include <rex/system.h>
+#include <rex/ui/keybinds.h>
+#include <rex/ui/window.h>
 
 #include <filesystem>
 #include <functional>
@@ -115,6 +117,17 @@ class Espgaluda2RecompApp : public rex::ReXApp {
   // futari-nx futari_app.h OnPostSetup: the scripted pad, the recorder and Renut's vblank thread.
   void OnPostSetup() override {
     espgaluda2::exit_guard::InstallX11IoErrorHandler();  // original code, src/exit_guard.h
+    // UnleashedRecomp ui/game_window.cpp (github.com/hedge-dev/UnleashedRecomp cf829a9) toggles fullscreen on Alt+Enter
+    // and stores it in its Fullscreen config; the same here through the SDK's keybinds, which take single keys: F11,
+    // kept in the fullscreen cvar so the settings overlay's Save to config keeps it.
+    rex::ui::RegisterBind("bind_fullscreen", "F11", "Toggle fullscreen", [this] {
+      if (rex::ui::Window* w = window()) {
+        const bool on = !w->IsFullscreen();
+        w->SetFullscreen(on);
+        rex::cvar::SetFlagByName("fullscreen", on ? "true" : "false");
+        REXLOG_INFO("fullscreen {} (bind_fullscreen)", on ? "on" : "off");
+      }
+    });
     futari::input_script::Install(runtime());
 #if FUTARI_RENUT_RENDERER
     // Renut's renderer has no GPU: the guest's vertical blank comes from a thread of its own.
