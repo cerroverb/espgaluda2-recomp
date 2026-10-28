@@ -101,6 +101,10 @@ struct HostTexture {
   bool dynamic = false;        // changes all the time (movie frames)
   uint32_t changes = 0;        // checks in a row that saw the content change
   uint64_t verified_frame = 0; // last periodic full check
+  // espgaluda2-recomp (RefreshLinearLocked): full hashes in a row that found the content unchanged, and the sampled
+  // hash (SampleHash) taken with the last of them.
+  uint32_t stable_checks = 0;
+  uint64_t stable_sample_hash = 0;
   // What SampleHash / ContentHash read: the base level's and the mip chain's
   // first page and extent in bytes, fixed by desc, worked out at the first check.
   bool sample_known = false;

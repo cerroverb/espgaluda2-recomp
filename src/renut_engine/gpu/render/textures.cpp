@@ -4,6 +4,8 @@
  */
 #include "renut_engine/gpu/render/textures.h"
 
+#include <rex/cvar.h>
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -78,6 +80,12 @@ std::unordered_map<uint64_t, uint32_t> g_samplers;  // sampler key -> slot
 std::vector<std::unique_ptr<plume::RenderSampler>> g_sampler_objects;
 uint64_t g_frame = 1;
 
+// espgaluda2-recomp: see RefreshLinearLocked.
+REXCVAR_DEFINE_BOOL(espgaluda2_renderer_stable_linear_sampling, true, "Espgaluda2/Renut",
+                    "Renut's renderer: a linear texture unchanged for 60 checks is checked with a sampled hash, and in "
+                    "full every 30 frames (false: in full at every check)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 // Resources D3D::UnlockResource was called on since the last bind that
 // looked (NoteTextureUnlocked; any thread, hence the lock of its own).
 std::mutex g_unlocked_mutex;
@@ -107,6 +115,8 @@ constexpr double kEvictMemoryShare = 0.85;
 constexpr uint64_t kLinearVerifyFrames = 30;
 constexpr uint64_t kUnlockWatchFrames = 8;
 constexpr uint32_t kDynamicChanges = 2;
+// espgaluda2-recomp: RefreshLinearLocked's stable linear textures.
+constexpr uint32_t kStableChecks = 60;
 
 uint32_t NullSlot(TextureDimension dimension) {
   switch (dimension) {
@@ -852,6 +862,7 @@ void ApplyUnlocksLocked() {
 // - Otherwise the content is hashed at every check.
 // A write after the check shows the next frame.
 void RefreshLinearLocked(HostTexture &t, const TextureFetch &fetch) {
+  static const bool kStableLinearSampling = REXCVAR_GET(espgaluda2_renderer_stable_linear_sampling);
   ApplyUnlocksLocked();
   auto upload = [&](uint64_t hash) {
     t.content_hash = hash;
@@ -895,13 +906,30 @@ void RefreshLinearLocked(HostTexture &t, const TextureFetch &fetch) {
         banjo::renut_gpu::CountTextureNoCards(uint64_t(t.sample_sizes[0]) + t.sample_sizes[1], 1);
     }
   } else {
+    // espgaluda2-recomp (original code, WORKLOG.md "Performance"): a linear texture whose full hash came out the same
+    // kStableChecks times in a row is checked with the sampled hash (its ends and probes, as tiled textures are)
+    // while it matches, and in full every kLinearVerifyFrames. Espgaluda II's sprite atlases are 2048x2048 linear
+    // textures loaded before their first bind, so never lock-driven: hashing each in full whenever bound read ~9 GB a
+    // second on the render thread (up to 13 ms a frame). Any sampled difference or unlock goes back to full hashes.
+    if (kStableLinearSampling && t.stable_checks >= kStableChecks && !verify_due && !t.unlocked) {
+      if (SampleHash(fetch, t) == t.stable_sample_hash) {
+        t.unlocked = false;
+        return;
+      }
+      t.stable_checks = 0;
+    }
     const uint64_t hash = CheckedHash(fetch, t, false);
     if (hash != t.content_hash) {
       upload(hash);
       t.dynamic = ++t.changes >= kDynamicChanges;
       t.verified_frame = g_frame;
+      t.stable_checks = 0;
     } else {
       t.changes = 0;
+      if (verify_due)
+        t.verified_frame = g_frame;
+      if (++t.stable_checks >= kStableChecks)
+        t.stable_sample_hash = SampleHash(fetch, t);
     }
   }
   t.unlocked = false;
