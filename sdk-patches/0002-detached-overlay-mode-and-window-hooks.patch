@@ -4,10 +4,10 @@
 # changed rex_app.cpp (its RefreshActiveState calls are kept). The close/minimize/restore hooks
 # of 7495132 are left out: 0.8.0's WindowListener has no such events.
 diff --git a/thirdparty/rexglue-sdk/include/rex/rex_app.h b/thirdparty/rexglue-sdk/include/rex/rex_app.h
-index e59dd03d..038591d5 100644
+index e59dd03d..b5abfe45 100644
 --- a/thirdparty/rexglue-sdk/include/rex/rex_app.h
 +++ b/thirdparty/rexglue-sdk/include/rex/rex_app.h
-@@ -161,6 +161,58 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+@@ -161,6 +161,63 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
    /// Use for cleanup that depends on runtime resources.
    virtual void OnGuestThreadExit(system::XThread* thread) { (void)thread; }
  
@@ -33,6 +33,11 @@ index e59dd03d..038591d5 100644
 +  /// See ui::AppUIDrawContext for the per-frame draw-context handoff. Default:
 +  /// no overlay (SDK presenter mode; this hook is never reached).
 +  virtual std::unique_ptr<ui::ImmediateDrawer> OnCreateImmediateDrawer() { return nullptr; }
++
++  // Stand up the ImGui overlay stack (drawer, F3/Backtick/F4 binds, dialogs)
++  // independently of how the presenter/drawer were obtained. `presenter` may be
++  // null (detached mode).
++  void SetupOverlays(ui::Presenter* presenter, ui::ImmediateDrawer* drawer);
 +
 +  // --- Window event hooks (delivered on the UI thread) ---
 +
@@ -66,7 +71,7 @@ index e59dd03d..038591d5 100644
    // --- Init phase methods (called in order from OnInitialize) ---
  
    /// Resolve path defaults, load config TOML, initialize logging.
-@@ -206,6 +258,10 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+@@ -206,6 +263,10 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
  
    // WindowListener overrides
    void OnClosing(ui::UIEvent& e) override;
