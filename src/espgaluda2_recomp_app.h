@@ -5,6 +5,7 @@
 #pragma once
 
 #include <rex/cvar.h>
+#include <rex/graphics/graphics_system.h>
 #include <rex/filesystem.h>
 #include <rex/rex_app.h>
 #include <rex/system.h>
@@ -124,7 +125,8 @@ class Espgaluda2RecompApp : public rex::ReXApp {
 #endif
     futari::capture::Start([this]() -> rex::ui::Presenter* {
       const auto* rt = runtime();
-      const auto* graphics = rt ? rt->graphics_system() : nullptr;
+      // ReXGlue 0.8.0: graphics_system() is the IGraphicsSystem interface; the presenter is on GraphicsSystem.
+      auto* graphics = rt ? static_cast<rex::graphics::GraphicsSystem*>(rt->graphics_system()) : nullptr;
       return graphics ? graphics->presenter() : nullptr;
     });
   }
