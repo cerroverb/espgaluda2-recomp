@@ -64,6 +64,7 @@ set(ESPGALUDA2RECOMP_SOURCES
     src/futari_capture.cpp
     src/futari_input_script.cpp
     src/debug_xmem_trace.cpp
+    src/exit_guard.cpp
 )
 
 if(WIN32)

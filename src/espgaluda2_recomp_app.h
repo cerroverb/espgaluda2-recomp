@@ -14,6 +14,7 @@
 #include <functional>
 #include <optional>
 
+#include "exit_guard.h"
 #include "futari_capture.h"
 #include "futari_input_script.h"
 #include "game_setup.h"
@@ -113,6 +114,7 @@ class Espgaluda2RecompApp : public rex::ReXApp {
 
   // futari-nx futari_app.h OnPostSetup: the scripted pad, the recorder and Renut's vblank thread.
   void OnPostSetup() override {
+    espgaluda2::exit_guard::InstallX11IoErrorHandler();  // original code, src/exit_guard.h
     futari::input_script::Install(runtime());
 #if FUTARI_RENUT_RENDERER
     // Renut's renderer has no GPU: the guest's vertical blank comes from a thread of its own.
@@ -132,6 +134,7 @@ class Espgaluda2RecompApp : public rex::ReXApp {
   }
 
   void OnShutdown() override {
+    espgaluda2::exit_guard::ArmExitWatchdog();  // original code, src/exit_guard.h
     installer_.Stop();
     futari::capture::Stop();
 #if FUTARI_RENUT_RENDERER
