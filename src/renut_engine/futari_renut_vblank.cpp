@@ -41,7 +41,12 @@
 #include <windows.h>
 #endif
 #include <cmath>
+#include <condition_variable>
 #include <mutex>
+
+#if !REX_PLATFORM_SWITCH && !defined(_WIN32)
+#include <SDL3/SDL_video.h>  // espgaluda2-recomp: DisplayRefreshHz
+#endif
 #include <thread>
 
 #include "renut_engine/espgaluda2_renut_glue.h"  // espgaluda2-recomp: was native/futari_native.h
@@ -82,6 +87,9 @@ constexpr int kVblankThreadPriority = 0x2C;  // the render thread's (banjo_renut
 std::atomic<bool> g_running{false};
 rex::system::object_ref<rex::system::XHostThread> g_thread;
 std::atomic<uint64_t> g_vblanks{0};
+// espgaluda2-recomp: WaitForCount's wake-up (D3DDevice_Swap's presentation-interval wait, d3d/hooks/device.cpp).
+std::mutex g_count_mutex;
+std::condition_variable g_count_cv;
 
 // Direct3D's vblank handler is the one this was written for (checked once, when the title's device exists).
 bool SameHandler(rex::system::KernelState* kernel) {
@@ -108,7 +116,11 @@ void Vblank() {
   thread->SetActiveCpu(2);
   uint64_t args[] = {device};
   kernel->function_dispatcher()->ExecuteInterrupt(thread->thread_state(), kVblankHandler, args, 1);
-  g_vblanks.fetch_add(1, std::memory_order_relaxed);
+  {
+    std::lock_guard lock(g_count_mutex);
+    g_vblanks.fetch_add(1, std::memory_order_relaxed);
+  }
+  g_count_cv.notify_all();
 }
 
 #if REX_PLATFORM_SWITCH
@@ -285,10 +297,36 @@ void ObservePresents(DisplayGrid* grid, double nominal_ns, const std::atomic<boo
   }
 }
 
+#if !REX_PLATFORM_SWITCH && !defined(_WIN32)
+// espgaluda2-recomp: the refresh rate of the display the game window is on (SDL3, the SDK's window); 0 when unknown.
+double DisplayRefreshHz() {
+  int count = 0;
+  SDL_Window **windows = SDL_GetWindows(&count);
+  SDL_Window *window = (windows && count > 0) ? windows[0] : nullptr;
+  SDL_free(windows);
+  const SDL_DisplayID display = window ? SDL_GetDisplayForWindow(window) : 0;
+  const SDL_DisplayMode *mode = display ? SDL_GetCurrentDisplayMode(display) : nullptr;
+  return mode ? double(mode->refresh_rate) : 0.0;
+}
+#endif
+
 // False when the vblank cannot follow the display (no present wait, a display that is no multiple of the game's
 // rate): the timer runs then.
 bool FromPresents(double nominal_ns) {
   if (!REXCVAR_GET(futari_vblank_display_sync) || rex::kernel::xboxkrnl::VblankPerSwap()) return false;
+#if !REX_PLATFORM_SWITCH && !defined(_WIN32)
+  // espgaluda2-recomp (original code, WORKLOG.md "Game speed on high refresh displays"): the refresh is only measured
+  // from the shown presents, and a game presenting at 60 Hz on a 120 Hz display is shown every other refresh, so the
+  // measurement takes the display for 60 Hz and the vblank drifted faster than the game's rate (up to 64 a second).
+  // The display's own mode from SDL decides: anything but the game's rate keeps the 60 Hz timer, as a rate with no
+  // whole multiple already does below.
+  if (const double display_hz = DisplayRefreshHz(); display_hz > 0 && std::fabs(display_hz - 1e9 / nominal_ns) > 0.5) {
+    REXLOG_INFO("[renut] vblank: the display runs at {:.3f} Hz (SDL), not the game's {:.2f} Hz: the {:.2f} Hz timer "
+                "stays (futari_vblank_display_sync follows only a display at the game's rate)",
+                display_hz, 1e9 / nominal_ns, 1e9 / nominal_ns);
+    return false;
+  }
+#endif
   // The renderer's swapchain may not exist yet: the timer's vblanks until it does, for at most 10 s.
   const uint64_t give_up = SteadyNs() + 10000000000ull;
   uint64_t next_timer = SteadyNs() + uint64_t(nominal_ns);
@@ -489,6 +527,13 @@ void Stop() {
 
 uint64_t Count() {
   return g_vblanks.load(std::memory_order_relaxed);
+}
+
+bool WaitForCount(uint64_t target, uint32_t timeout_ms) {
+  std::unique_lock lock(g_count_mutex);
+  return g_count_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [target] {
+    return g_vblanks.load(std::memory_order_relaxed) >= target || !g_running.load(std::memory_order_acquire);
+  }) && g_vblanks.load(std::memory_order_relaxed) >= target;
 }
 
 }  // namespace futari::renut_vblank

@@ -1,0 +1,4939 @@
+# Backport to the SDOJ-bundled ReXGlue 0.8.0 of upstream rexglue-sdk (github.com/rexglue/rexglue-sdk, BSD-3-Clause):
+#   ba3f99b "add SDL3 windowing backend alongside platform backends" (applied as is),
+#   f709b92 "replace Win32/GTK windowing with unified SDL3 backend" (SDOJ had not changed the deleted POSIX main;
+#            its Win32-only rejects in mnk_input_driver.cpp are left out: Windows builds are not supported here),
+#   3529773 "add a Wayland surface type and the VK_KHR_wayland_surface extension" (surface.h, src/ui/CMakeLists.txt,
+#            window_sdl.cpp merged by hand; its CI workflow change left out),
+#   01bf04b "pick the SDL video driver at runtime instead of forcing x11" (by hand: the video_driver cvar, the
+#            surface error and SDLWindowedAppContext::Initialize; its macOS parts left out).
+# Plus espgaluda2-recomp's own: the SDL window is created with SDL_WINDOW_VULKAN, and SDL is built with SDL_VULKAN, for the app renderer.
+diff --git a/thirdparty/rexglue-sdk/cmake/rexglue_helpers.cmake b/thirdparty/rexglue-sdk/cmake/rexglue_helpers.cmake
+index 4bd66943..e091eebc 100644
+--- a/thirdparty/rexglue-sdk/cmake/rexglue_helpers.cmake
++++ b/thirdparty/rexglue-sdk/cmake/rexglue_helpers.cmake
+@@ -39,7 +39,7 @@ endfunction()
+ # rexglue_configure_target(<target>) - Host application
+ #
+ # Adds:
+-#   - Platform entry point source (windowed_app_main_*.cpp)
++#   - SDL3 entry point source (windowed_app_main_sdl.cpp)
+ #   - ReXApp base class source (rex_app.cpp)
+ #   - Build-config define for the version stamp
+ #   - $ORIGIN RPATH on UNIX so the host finds librexruntime.so next to itself
+@@ -48,15 +48,8 @@ endfunction()
+ #     so this single copy handles them transitively.
+ #==========================================================
+ function(rexglue_configure_target target_name)
+-    if(WIN32)
+-        target_sources(${target_name} PRIVATE
+-            ${REXGLUE_SHARE_DIR}/windowed_app_main_win.cpp)
+-    else()
+-        target_sources(${target_name} PRIVATE
+-            ${REXGLUE_SHARE_DIR}/windowed_app_main_posix.cpp)
+-    endif()
+-
+     target_sources(${target_name} PRIVATE
++        ${REXGLUE_SHARE_DIR}/windowed_app_main_sdl.cpp
+         ${REXGLUE_SHARE_DIR}/rex_app.cpp)
+ 
+     target_compile_definitions(${target_name} PRIVATE
+diff --git a/thirdparty/rexglue-sdk/cmake/rexglue_install.cmake b/thirdparty/rexglue-sdk/cmake/rexglue_install.cmake
+index e7d51356..9f407b41 100644
+--- a/thirdparty/rexglue-sdk/cmake/rexglue_install.cmake
++++ b/thirdparty/rexglue-sdk/cmake/rexglue_install.cmake
+@@ -112,10 +112,9 @@ if(REXGLUE_USE_VULKAN)
+     )
+ endif()
+ 
+-# Install platform entry point sources and ReXApp for SDK consumers
++# Install the entry point source and ReXApp for SDK consumers
+ install(FILES
+-    src/ui/windowed_app_main_win.cpp
+-    src/ui/windowed_app_main_posix.cpp
++    src/ui/windowed_app_main_sdl.cpp
+     src/ui/rex_app.cpp
+     DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue
+ )
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/flags.h b/thirdparty/rexglue-sdk/include/rex/ui/flags.h
+index ad6065df..620626c2 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/flags.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/flags.h
+@@ -29,6 +29,7 @@ REXCVAR_DECLARE(bool, host_present_from_non_ui_thread);
+ REXCVAR_DECLARE(int32_t, window_width);
+ REXCVAR_DECLARE(int32_t, window_height);
+ REXCVAR_DECLARE(bool, fullscreen);
++REXCVAR_DECLARE(std::string, video_driver);
+ REXCVAR_DECLARE(int32_t, monitor);
+ 
+ // D3D12
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/presenter.h b/thirdparty/rexglue-sdk/include/rex/ui/presenter.h
+index e9c75c05..afb4a30b 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/presenter.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/presenter.h
+@@ -52,7 +52,6 @@ namespace ui {
+ 
+ class Presenter;
+ class Window;
+-class Win32Window;
+ 
+ class UIDrawContext {
+  public:
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/sdl_virtual_key.h b/thirdparty/rexglue-sdk/include/rex/ui/sdl_virtual_key.h
+new file mode 100644
+index 00000000..d22b00a3
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/include/rex/ui/sdl_virtual_key.h
+@@ -0,0 +1,24 @@
++/**
++ * @file        ui/sdl_virtual_key.h
++ * @brief       SDL3 scancode to Win32-style VirtualKey translation
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#pragma once
++
++#include <SDL3/SDL_scancode.h>
++
++#include <rex/ui/virtual_key.h>
++
++namespace rex::ui {
++
++/// Maps an SDL scancode to the Win32-style VirtualKey used by the input
++/// listener API. Returns VirtualKey::kNone for unmapped keys.
++VirtualKey TranslateSDLScancode(SDL_Scancode scancode);
++
++}  // namespace rex::ui
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/surface.h b/thirdparty/rexglue-sdk/include/rex/ui/surface.h
+index 34e1d656..567b649e 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/surface.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/surface.h
+@@ -29,7 +29,8 @@ class Surface {
+     // window.
+     // Android.
+     kTypeIndex_AndroidNativeWindow,
+-    // GNU/Linux.
++    // GNU/Linux. Wayland first: xcb is only reachable through XWayland there.
++    kTypeIndex_WaylandSurface,
+     kTypeIndex_XcbWindow,
+     // Windows.
+     kTypeIndex_Win32Hwnd,
+@@ -37,6 +38,7 @@ class Surface {
+   using TypeFlags = uint32_t;
+   enum : TypeFlags {
+     kTypeFlag_AndroidNativeWindow = TypeFlags(1) << kTypeIndex_AndroidNativeWindow,
++    kTypeFlag_WaylandSurface = TypeFlags(1) << kTypeIndex_WaylandSurface,
+     kTypeFlag_XcbWindow = TypeFlags(1) << kTypeIndex_XcbWindow,
+     kTypeFlag_Win32Hwnd = TypeFlags(1) << kTypeIndex_Win32Hwnd,
+   };
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/surface_gnulinux.h b/thirdparty/rexglue-sdk/include/rex/ui/surface_gnulinux.h
+index 668993c1..4379d606 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/surface_gnulinux.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/surface_gnulinux.h
+@@ -14,6 +14,10 @@
+ 
+ #include <xcb/xcb.h>
+ 
++struct SDL_Window;
++struct wl_display;
++struct wl_surface;
++
+ namespace rex {
+ namespace ui {
+ 
+@@ -33,5 +37,22 @@ class XcbWindowSurface final : public Surface {
+   xcb_window_t window_;
+ };
+ 
++class WaylandSurface final : public Surface {
++ public:
++  explicit WaylandSurface(::wl_display* display, ::wl_surface* surface, SDL_Window* sdl_window)
++      : display_(display), surface_(surface), sdl_window_(sdl_window) {}
++  TypeIndex GetType() const override { return kTypeIndex_WaylandSurface; }
++  ::wl_display* display() const { return display_; }
++  ::wl_surface* surface() const { return surface_; }
++
++ protected:
++  bool GetSizeImpl(uint32_t& width_out, uint32_t& height_out) const override;
++
++ private:
++  ::wl_display* display_;
++  ::wl_surface* surface_;
++  SDL_Window* sdl_window_;
++};
++
+ }  // namespace ui
+ }  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/api.h b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/api.h
+index 278e9550..4d0dd495 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/api.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/api.h
+@@ -36,6 +36,12 @@
+ #ifndef VK_USE_PLATFORM_XCB_KHR
+ #define VK_USE_PLATFORM_XCB_KHR
+ #endif
++// From the platform, never the build system: it gates members of
++// VulkanInstance::Functions, so every includer has to agree, plugins included.
++#ifndef VK_USE_PLATFORM_WAYLAND_KHR
++#define VK_USE_PLATFORM_WAYLAND_KHR
++#endif
++#include <wayland-client.h>
+ #endif
+ 
+ #if REX_PLATFORM_WIN32
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/functions/instance_khr_wayland_surface.inc b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/functions/instance_khr_wayland_surface.inc
+new file mode 100644
+index 00000000..c1715f5a
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/functions/instance_khr_wayland_surface.inc
+@@ -0,0 +1,2 @@
++// VK_KHR_wayland_surface functions used in ReXGlue.
++XE_UI_VULKAN_FUNCTION(vkCreateWaylandSurfaceKHR)
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/instance.h b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/instance.h
+index e6726294..51db210a 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/vulkan/instance.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/vulkan/instance.h
+@@ -58,6 +58,10 @@ class VulkanInstance {
+     // VK_KHR_xcb_surface (#6)
+ #ifdef VK_USE_PLATFORM_XCB_KHR
+ #include <rex/ui/vulkan/functions/instance_khr_xcb_surface.inc>
++#endif
++    // VK_KHR_wayland_surface (#7)
++#ifdef VK_USE_PLATFORM_WAYLAND_KHR
++#include <rex/ui/vulkan/functions/instance_khr_wayland_surface.inc>
+ #endif
+     // VK_KHR_android_surface (#9)
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+@@ -86,6 +90,9 @@ class VulkanInstance {
+ #ifdef VK_USE_PLATFORM_XCB_KHR
+     bool ext_KHR_xcb_surface = false;  // #6
+ #endif
++#ifdef VK_USE_PLATFORM_WAYLAND_KHR
++    bool ext_KHR_wayland_surface = false;  // #7
++#endif
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+     bool ext_KHR_android_surface = false;  // #9
+ #endif
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/window.h b/thirdparty/rexglue-sdk/include/rex/ui/window.h
+index 4bf2d7cd..9702d7ba 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/window.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/window.h
+@@ -541,6 +541,13 @@ class Window {
+   void OnBeforeClose(WindowDestructionReceiver& destruction_receiver);
+   void OnAfterClose();
+ 
++  // Asks all listeners whether a user-initiated close may proceed. Returns
++  // false if any listener vetoed or the window was destroyed from a callback.
++  bool SendCloseRequestToListeners(WindowDestructionReceiver& destruction_receiver);
++
++  void OnMinimized(WindowDestructionReceiver& destruction_receiver);
++  void OnRestored(WindowDestructionReceiver& destruction_receiver);
++
+   // These functions may usually also be called as part of the opening process
+   // from within OpenImpl (directly or through the platform event handler
+   // invoked during it) to actualize the state for the newly createad window,
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/window_gtk.h b/thirdparty/rexglue-sdk/include/rex/ui/window_gtk.h
+deleted file mode 100644
+index 433fda30..00000000
+--- a/thirdparty/rexglue-sdk/include/rex/ui/window_gtk.h
++++ /dev/null
+@@ -1,104 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2022 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#pragma once
+-
+-#include <memory>
+-#include <string>
+-
+-#include <rex/platform.h>
+-#include <rex/ui/menu_item.h>
+-#include <rex/ui/window.h>
+-
+-#include <gdk/gdk.h>
+-#include <gtk/gtk.h>
+-#include <xcb/xcb.h>
+-
+-namespace rex {
+-namespace ui {
+-
+-class GTKWindow : public Window {
+-  using super = Window;
+-
+- public:
+-  GTKWindow(WindowedAppContext& app_context, const std::string_view title,
+-            uint32_t desired_logical_width, uint32_t desired_logical_height);
+-  ~GTKWindow() override;
+-
+-  // Will be null if the window hasn't been successfully opened yet, or has been
+-  // closed.
+-  GtkWidget* window() const { return window_; }
+-
+- protected:
+-  bool OpenImpl() override;
+-  void RequestCloseImpl() override;
+-
+-  void ApplyNewFullscreen() override;
+-  void ApplyNewTitle() override;
+-  void ApplyNewMainMenu(MenuItem* old_main_menu) override;
+-  // Mouse capture seems to happen implicitly compared to Windows.
+-  void FocusImpl() override;
+-
+-  std::unique_ptr<Surface> CreateSurfaceImpl(Surface::TypeFlags allowed_types) override;
+-  void RequestPaintImpl() override;
+-
+- private:
+-  void HandleSizeUpdate(WindowDestructionReceiver& destruction_receiver);
+-  // For updating multiple factors that may influence the window size at once,
+-  // without handling the configure event multiple times (that may not only
+-  // result in wasted handling, but also in the state potentially changed to an
+-  // inconsistent one in the middle of a size update by the listeners).
+-  void BeginBatchedSizeUpdate();
+-  void EndBatchedSizeUpdate(WindowDestructionReceiver& destruction_receiver);
+-
+-  // Handling events related to the whole window.
+-  bool HandleMouse(GdkEvent* event, WindowDestructionReceiver& destruction_receiver);
+-  bool HandleKeyboard(GdkEventKey* event, WindowDestructionReceiver& destruction_receiver);
+-  gboolean WindowEventHandler(GdkEvent* event);
+-  static gboolean WindowEventHandlerThunk(GtkWidget* widget, GdkEvent* event, gpointer user_data);
+-
+-  // Handling events related specifically to the drawing (client) area.
+-  gboolean DrawingAreaEventHandler(GdkEvent* event);
+-  static gboolean DrawingAreaEventHandlerThunk(GtkWidget* widget, GdkEvent* event,
+-                                               gpointer user_data);
+-  static gboolean DrawHandler(GtkWidget* widget, cairo_t* cr, gpointer data);
+-
+-  // Non-owning (initially floating) references to the widgets.
+-  GtkWidget* window_ = nullptr;
+-  GtkWidget* box_ = nullptr;
+-  GtkWidget* drawing_area_ = nullptr;
+-
+-  uint32_t batched_size_update_depth_ = 0;
+-  bool batched_size_update_contained_configure_ = false;
+-  bool batched_size_update_contained_draw_ = false;
+-};
+-
+-class GTKMenuItem : public MenuItem {
+- public:
+-  GTKMenuItem(Type type, const std::string& text, const std::string& hotkey,
+-              std::function<void()> callback);
+-  ~GTKMenuItem() override;
+-
+-  GtkWidget* handle() const { return menu_; }
+-
+- protected:
+-  void OnChildAdded(MenuItem* child_item) override;
+-  void OnChildRemoved(MenuItem* child_item) override;
+-
+- private:
+-  static void ActivateHandler(GtkWidget* menu_item, gpointer user_data);
+-
+-  // An owning reference because a menu may be transferred between windows.
+-  GtkWidget* menu_ = nullptr;
+-};
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/window_listener.h b/thirdparty/rexglue-sdk/include/rex/ui/window_listener.h
+index 36aed2fd..e0bbffb3 100644
+--- a/thirdparty/rexglue-sdk/include/rex/ui/window_listener.h
++++ b/thirdparty/rexglue-sdk/include/rex/ui/window_listener.h
+@@ -27,6 +27,15 @@ class WindowListener {
+   virtual void OnOpened(UISetupEvent&) {}
+   virtual void OnClosing(UIEvent&) {}
+ 
++  // Called when the user asks to close the window (close button, Alt+F4).
++  // Return false to veto: the window stays open and the vetoing party is
++  // expected to close it explicitly later (Window::RequestClose) once it is
++  // safe (renderers drained, guest threads stopped). Default accepts.
++  virtual bool OnCloseRequested(UIEvent&) { return true; }
++
++  virtual void OnMinimized(UIEvent&) {}
++  virtual void OnRestored(UIEvent&) {}
++
+   virtual void OnDpiChanged(UISetupEvent&) {}
+   virtual void OnResize(UISetupEvent&) {}
+ 
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/window_sdl.h b/thirdparty/rexglue-sdk/include/rex/ui/window_sdl.h
+new file mode 100644
+index 00000000..5d8476f3
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/include/rex/ui/window_sdl.h
+@@ -0,0 +1,81 @@
++/**
++ * @file        ui/window_sdl.h
++ * @brief       SDL3 implementation of the Window abstraction
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ *
++ * @remarks     Derived from Xenia's window_win.cc (Ben Vanik, 2020).
++ */
++
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <memory>
++#include <string_view>
++
++#include <SDL3/SDL.h>
++
++#include <rex/ui/window.h>
++#include <rex/ui/windowed_app_context_sdl.h>
++
++namespace rex::ui {
++
++class WindowSDL final : public Window {
++ public:
++  WindowSDL(WindowedAppContext& app_context, const std::string_view title,
++            uint32_t desired_logical_width, uint32_t desired_logical_height);
++  ~WindowSDL() override;
++
++  void* GetNativeWindowHandle() const override;
++
++  // Called by SDLWindowedAppContext on the UI thread.
++  void HandleWindowEvent(SDL_Event& event);
++  void HandleKeyEvent(SDL_Event& event);
++  void HandleTextInputEvent(SDL_Event& event);
++  void HandleMouseEvent(SDL_Event& event);
++  void HandleDropEvent(SDL_Event& event);
++  void HandlePaintEvent();
++
++ protected:
++  uint32_t GetLatestDpiImpl() const override;
++
++  bool OpenImpl() override;
++  void RequestCloseImpl() override;
++
++  void ApplyNewFullscreen() override;
++  void ApplyNewTitle() override;
++  void ApplyNewMouseCapture() override;
++  void ApplyNewMouseRelease() override;
++  void ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) override;
++  void FocusImpl() override;
++
++  std::unique_ptr<Surface> CreateSurfaceImpl(Surface::TypeFlags allowed_types) override;
++  void RequestPaintImpl() override;
++
++ private:
++  SDLWindowedAppContext& sdl_app_context() const {
++    return static_cast<SDLWindowedAppContext&>(app_context());
++  }
++
++  // Performs the common close choreography (OnBeforeClose, native destroy,
++  // OnAfterClose). Used by both RequestCloseImpl and the close-requested
++  // event handler.
++  void PerformClose();
++  void DestroySDLWindow();
++
++  void ApplyCursorVisibilityNow();
++  void RearmCursorAutoHideTimer();
++
++  SDL_Window* sdl_window_ = nullptr;
++  SDL_WindowID sdl_window_id_ = 0;
++  std::atomic<bool> paint_pending_{false};
++  // Auto-hide cursor bookkeeping (CursorVisibility::kAutoHidden).
++  SDL_TimerID cursor_hide_timer_ = 0;
++};
++
++}  // namespace rex::ui
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/window_win.h b/thirdparty/rexglue-sdk/include/rex/ui/window_win.h
+deleted file mode 100644
+index 0b0bb854..00000000
+--- a/thirdparty/rexglue-sdk/include/rex/ui/window_win.h
++++ /dev/null
+@@ -1,177 +0,0 @@
+-#pragma once
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2022 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <memory>
+-#include <string>
+-
+-#include <rex/ui/menu_item.h>
+-#include <rex/ui/window.h>
+-
+-#ifndef WIN32_LEAN_AND_MEAN
+-#define WIN32_LEAN_AND_MEAN
+-#endif
+-#ifndef NOMINMAX
+-#define NOMINMAX
+-#endif
+-#include <dxgi.h>
+-#include <windows.h>
+-
+-#include <ShellScalingApi.h>
+-
+-namespace rex {
+-namespace ui {
+-
+-class Win32Window : public Window {
+-  using super = Window;
+-
+- public:
+-  Win32Window(WindowedAppContext& app_context, const std::string_view title,
+-              uint32_t desired_logical_width, uint32_t desired_logical_height);
+-  ~Win32Window() override;
+-
+-  // Will be null if the window hasn't been successfully opened yet, or has been
+-  // closed.
+-  HWND hwnd() const { return hwnd_; }
+-
+-  void* GetNativeWindowHandle() const override { return reinterpret_cast<void*>(hwnd_); }
+-
+-  uint32_t GetMediumDpi() const override;
+-
+- protected:
+-  bool OpenImpl() override;
+-  void RequestCloseImpl() override;
+-
+-  uint32_t GetLatestDpiImpl() const override;
+-
+-  void ApplyNewFullscreen() override;
+-  void ApplyNewTitle() override;
+-  void LoadAndApplyIcon(const void* buffer, size_t size,
+-                        bool can_apply_state_in_current_phase) override;
+-  void ApplyNewMainMenu(MenuItem* old_main_menu) override;
+-  void CompleteMainMenuItemsUpdateImpl() override;
+-  void ApplyNewMouseCapture() override;
+-  void ApplyNewMouseRelease() override;
+-  void ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) override;
+-  void FocusImpl() override;
+-
+-  std::unique_ptr<Surface> CreateSurfaceImpl(Surface::TypeFlags allowed_types) override;
+-  void RequestPaintImpl() override;
+-
+- private:
+-  enum : UINT {
+-    kUserMessageAutoHideCursor = WM_USER,
+-  };
+-
+-  BOOL AdjustWindowRectangle(RECT& rect, DWORD style, BOOL menu, DWORD ex_style, UINT dpi) const;
+-  BOOL AdjustWindowRectangle(RECT& rect) const;
+-
+-  uint32_t GetCurrentSystemDpi() const;
+-  uint32_t GetCurrentDpi() const;
+-
+-  void ApplyFullscreenEntry(WindowDestructionReceiver& destruction_receiver);
+-
+-  void HandleSizeUpdate(WindowDestructionReceiver& destruction_receiver);
+-  // For updating multiple factors that may influence the window size at once,
+-  // without handling WM_SIZE multiple times (that may not only result in wasted
+-  // handling, but also in the state potentially changed to an inconsistent one
+-  // in the middle of a size update by the listeners).
+-  void BeginBatchedSizeUpdate();
+-  void EndBatchedSizeUpdate(WindowDestructionReceiver& destruction_receiver);
+-
+-  bool HandleMouse(UINT message, WPARAM wParam, LPARAM lParam,
+-                   WindowDestructionReceiver& destruction_receiver);
+-  bool HandleKeyboard(UINT message, WPARAM wParam, LPARAM lParam,
+-                      WindowDestructionReceiver& destruction_receiver);
+-
+-  void SetCursorIfFocusedOnClientArea(HCURSOR cursor) const;
+-  void SetCursorAutoHideTimer();
+-  static void NTAPI AutoHideCursorTimerCallback(void* parameter, BOOLEAN timer_or_wait_fired);
+-
+-  static LRESULT CALLBACK WndProcThunk(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+-  // This can't handle messages sent during CreateWindow (hwnd_ still not
+-  // assigned to) or after nulling hwnd_ in closing / deleting.
+-  virtual LRESULT WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+-
+-  HCURSOR arrow_cursor_ = nullptr;
+-
+-  HICON icon_ = nullptr;
+-
+-  uint32_t dpi_ = USER_DEFAULT_SCREEN_DPI;
+-
+-  // hwnd_ may be accessed by the cursor hiding timer callback from a separate
+-  // thread, but the timer can be active only with a valid window anyway.
+-  HWND hwnd_ = nullptr;
+-
+-  uint32_t batched_size_update_depth_ = 0;
+-  bool batched_size_update_contained_wm_size_ = false;
+-  bool batched_size_update_contained_wm_paint_ = false;
+-
+-  uint32_t pre_fullscreen_dpi_;
+-  WINDOWPLACEMENT pre_fullscreen_placement_;
+-  // The client area part of pre_fullscreen_placement_.rcNormalPosition, saved
+-  // in case something effecting the behavior of AdjustWindowRectEx for the
+-  // non-fullscreen state is changed mid-fullscreen (for instance, the menu is
+-  // toggled), so a new AdjustWindowRectExForDpi call for the old DPI, but with
+-  // the other state different than the old one, while exiting fullscreen, won't
+-  // cause anomalies like negative size.
+-  uint32_t pre_fullscreen_normal_client_width_;
+-  uint32_t pre_fullscreen_normal_client_height_;
+-
+-  // Must be the screen position, not the client position, so it's possible to
+-  // immediately hide the cursor, for instance, when switching to fullscreen
+-  // (and thus changing the client area top-left corner, resulting in
+-  // WM_MOUSEMOVE being sent, which would instantly reveal the cursor because of
+-  // that relative position change).
+-  POINT cursor_auto_hide_last_screen_pos_ = {LONG_MAX, LONG_MAX};
+-  // Using a timer queue timer for hiding the cursor rather than WM_TIMER
+-  // because the latter is a very low-priority message which is never received
+-  // if WM_PAINT messages are sent continuously (invalidating the window right
+-  // after painting).
+-  HANDLE cursor_auto_hide_timer_ = nullptr;
+-  // Last hiding case numbers for skipping of obsolete cursor hiding messages
+-  // (both WM_MOUSEMOVE and the hiding message have been sent, for instance, and
+-  // WM_MOUSEMOVE hasn't been handled yet, or the cursor visibility state has
+-  // been changed). The queued index is read, and the signaled index is written,
+-  // by the timer callback, which is executed outside the message thread, so
+-  // before modifying the queued number, or reading the signaled number, in the
+-  // message thread, delete the timer (deleting the timer awaits cancels the
+-  // callback if it hasn't been invoked yet, or awaits it if it has). Use
+-  // equality comparison for safe rollover handling.
+-  WPARAM last_cursor_auto_hide_queued = 0;
+-  WPARAM last_cursor_auto_hide_signaled = 0;
+-  // Whether the cursor has been hidden after the expiration of the timer, and
+-  // hasn't been revealed yet.
+-  bool cursor_currently_auto_hidden_ = false;
+-};
+-
+-class Win32MenuItem : public MenuItem {
+- public:
+-  Win32MenuItem(Type type, const std::string& text, const std::string& hotkey,
+-                std::function<void()> callback);
+-  ~Win32MenuItem() override;
+-
+-  HMENU handle() const { return handle_; }
+-
+-  void SetEnabled(bool enabled) override;
+-
+-  using MenuItem::OnSelected;
+-
+- protected:
+-  void OnChildAdded(MenuItem* child_item) override;
+-  void OnChildRemoved(MenuItem* child_item) override;
+-
+- private:
+-  HMENU handle_ = nullptr;
+-};
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_gtk.h b/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_gtk.h
+deleted file mode 100644
+index 644b21c8..00000000
+--- a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_gtk.h
++++ /dev/null
+@@ -1,46 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2021 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#pragma once
+-
+-#include <mutex>
+-
+-#include <rex/ui/windowed_app_context.h>
+-
+-#include <glib.h>
+-
+-namespace rex {
+-namespace ui {
+-
+-class GTKWindowedAppContext final : public WindowedAppContext {
+- public:
+-  GTKWindowedAppContext() = default;
+-  ~GTKWindowedAppContext();
+-
+-  void NotifyUILoopOfPendingFunctions() override;
+-
+-  void PlatformQuitFromUIThread() override;
+-
+-  void RunMainGTKLoop();
+-
+- private:
+-  static gboolean PendingFunctionsSourceFunc(gpointer data);
+-
+-  static gboolean QuitSourceFunc(gpointer data);
+-
+-  std::mutex pending_functions_idle_pending_mutex_;
+-  guint pending_functions_idle_pending_ = 0;
+-
+-  guint quit_idle_pending_ = 0;
+-};
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_sdl.h b/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_sdl.h
+new file mode 100644
+index 00000000..4d1e22fe
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_sdl.h
+@@ -0,0 +1,60 @@
++/**
++ * @file        ui/windowed_app_context_sdl.h
++ * @brief       SDL3 implementation of the windowed app UI loop context
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#pragma once
++
++#include <cstdint>
++#include <unordered_map>
++
++#include <SDL3/SDL_events.h>
++
++#include <rex/ui/windowed_app_context.h>
++
++namespace rex::ui {
++
++class WindowSDL;
++
++class SDLWindowedAppContext final : public WindowedAppContext {
++ public:
++  SDLWindowedAppContext() = default;
++  ~SDLWindowedAppContext() override;
++
++  // Initializes the SDL video subsystem and registers the custom event types.
++  // Must be called (and must succeed) before any other use.
++  bool Initialize();
++
++  void NotifyUILoopOfPendingFunctions() override;
++  void PlatformQuitFromUIThread() override;
++
++  int RunMainMessageLoop();
++
++  // Custom SDL event type carrying a coalesced paint request for a window
++  // (user.windowID identifies the target).
++  uint32_t paint_event_type() const { return paint_event_type_; }
++
++  // Window registry for event routing. UI thread only.
++  void RegisterWindow(SDL_WindowID id, WindowSDL* window) { windows_.emplace(id, window); }
++  void UnregisterWindow(SDL_WindowID id) { windows_.erase(id); }
++
++ private:
++  WindowSDL* GetWindow(SDL_WindowID id) const {
++    auto it = windows_.find(id);
++    return it != windows_.end() ? it->second : nullptr;
++  }
++
++  void ProcessEvent(SDL_Event& event);
++
++  std::unordered_map<SDL_WindowID, WindowSDL*> windows_;
++  uint32_t wakeup_event_type_ = 0;
++  uint32_t paint_event_type_ = 0;
++};
++
++}  // namespace rex::ui
+diff --git a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_win.h b/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_win.h
+deleted file mode 100644
+index 09b20f72..00000000
+--- a/thirdparty/rexglue-sdk/include/rex/ui/windowed_app_context_win.h
++++ /dev/null
+@@ -1,117 +0,0 @@
+-#pragma once
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2022 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <memory>
+-
+-#ifndef WIN32_LEAN_AND_MEAN
+-#define WIN32_LEAN_AND_MEAN
+-#endif
+-#ifndef NOMINMAX
+-#define NOMINMAX
+-#endif
+-#include <windows.h>
+-#include <shellapi.h>
+-
+-#include <rex/ui/windowed_app_context.h>
+-
+-// For per-monitor DPI awareness v1.
+-#include <ShellScalingApi.h>
+-
+-namespace rex {
+-namespace ui {
+-
+-class Win32WindowedAppContext final : public WindowedAppContext {
+- public:
+-  // clang-format off
+-  struct PerMonitorDpiV1Api {
+-    HRESULT (STDAPICALLTYPE* get_dpi_for_monitor)(
+-        HMONITOR hmonitor, MONITOR_DPI_TYPE dpi_type, UINT* dpi_x, UINT* dpi_y);
+-  };
+-  struct PerMonitorDpiV2Api {
+-    // Important note: Even though per-monitor DPI awareness version 2
+-    // inherently has automatic non-client area DPI scaling, PMv2 was added in
+-    // Windows 10 1703. However, these functions were added earlier, in 1607.
+-    // While we haven't tested the actual behavior on 1607 and this is just a
+-    // guess, still, before using AdjustWindowRectExForDpi for the window DPI,
+-    // make sure that EnableNonClientDpiScaling is called for the window in its
+-    // WM_NCCREATE handler to enable automatic non-client DPI scaling on PMv1 on
+-    // 1607, so AdjustWindowRectExForDpi (which doesn't have a window argument
+-    // so it can't know whether automatic scaling is enabled for it) will likely
+-    // return values that reflect the actual size of the non-client area of the
+-    // window (otherwise, for instance, "un-adjusting" the actual window
+-    // rectangle using AdjustWindowRectExForDpi may result in a negative client
+-    // area size if the DPI passed to it is larger than the DPI actually used
+-    // for the non-client area).
+-    BOOL (WINAPI* adjust_window_rect_ex_for_dpi)(
+-        LPRECT rect, DWORD style, BOOL menu, DWORD ex_style, UINT dpi);
+-    BOOL (WINAPI* enable_non_client_dpi_scaling)(HWND hwnd);
+-    UINT (WINAPI* get_dpi_for_system)();
+-    UINT (WINAPI* get_dpi_for_window)(HWND hwnd);
+-  };
+-  // clang-format on
+-
+-  // Must call Initialize and check its result after creating to be able to
+-  // perform pending function calls.
+-  explicit Win32WindowedAppContext(HINSTANCE hinstance, int show_cmd)
+-      : hinstance_(hinstance), show_cmd_(show_cmd) {}
+-  ~Win32WindowedAppContext();
+-
+-  bool Initialize();
+-
+-  HINSTANCE hinstance() const { return hinstance_; }
+-  int show_cmd() const { return show_cmd_; }
+-
+-  void NotifyUILoopOfPendingFunctions() override;
+-
+-  void PlatformQuitFromUIThread() override;
+-
+-  int RunMainMessageLoop();
+-
+-  // Per-monitor DPI awareness version 2 is expected to be enabled via the
+-  // manifest, as that's the recommended way, which also doesn't require calling
+-  // SetProcessDpiAwareness before doing anything that may depend on DPI
+-  // awareness (so it's safe to use any Windows APIs before what would be
+-  // supposed to initialize it).
+-  // Windows 8.1 per-monitor DPI awareness version 1.
+-  const PerMonitorDpiV1Api* per_monitor_dpi_v1_api() const {
+-    return per_monitor_dpi_v1_api_available_ ? &per_monitor_dpi_v1_api_ : nullptr;
+-  }
+-  // Windows 10 1607 per-monitor DPI awareness API, also heavily used for
+-  // per-monitor DPI awareness version 2 functionality added in Windows 10 1703.
+-  const PerMonitorDpiV2Api* per_monitor_dpi_v2_api() const {
+-    return per_monitor_dpi_v2_api_available_ ? &per_monitor_dpi_v2_api_ : nullptr;
+-  }
+-
+- private:
+-  enum : UINT {
+-    kPendingFunctionsWindowClassMessageExecute = WM_USER,
+-  };
+-
+-  static LRESULT CALLBACK PendingFunctionsWndProc(HWND hwnd, UINT message, WPARAM wparam,
+-                                                  LPARAM lparam);
+-
+-  HINSTANCE hinstance_;
+-  int show_cmd_;
+-
+-  HMODULE shcore_module_ = nullptr;
+-  HMODULE user32_module_ = nullptr;
+-  PerMonitorDpiV1Api per_monitor_dpi_v1_api_ = {};
+-  PerMonitorDpiV2Api per_monitor_dpi_v2_api_ = {};
+-  bool per_monitor_dpi_v1_api_available_ = false;
+-  bool per_monitor_dpi_v2_api_available_ = false;
+-
+-  static bool pending_functions_window_class_registered_;
+-  HWND pending_functions_hwnd_ = nullptr;
+-};
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp b/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
+index 61d48b94..fd26acb5 100644
+--- a/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
++++ b/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
+@@ -287,6 +287,16 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
+         DisplayVblankLock display_lock(1000.0 / refresh_rate_hz);
+         const double ticks_per_ms = double(guest_tick_frequency) / 1000.0;
+         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
++        // espgaluda2-recomp (sdk-patches/0005, original code): with vblank_per_swap (sdk-patches/0003) one guest
++        // vblank per Swap, as Renut's vblank thread does, so both renderers advance the game the same way and runs
++        // can be compared frame by frame.
++        if (kernel::xboxkrnl::VblankPerSwap()) {
++          uint64_t last_swap = kernel::xboxkrnl::GuestSwapCount();
++          while (vsync_worker_running_) {
++            if (kernel::xboxkrnl::WaitSwapForVblank(last_swap, vsync_worker_running_)) MarkVblank();
++          }
++          return 0;
++        }
+         while (vsync_worker_running_) {
+           {
+             // Positive delays the next vblank, negative brings it forward.
+diff --git a/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt b/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
+index ad500291..a05deb6b 100644
+--- a/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
++++ b/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
+@@ -12,9 +12,12 @@ set(REXUI_CORE_SOURCES
+     display_timing.cpp
+     presenter.cpp
+     renderdoc_api.cpp
++    sdl_virtual_key.cpp
+     window.cpp
++    window_sdl.cpp
+     windowed_app.cpp
+     windowed_app_context.cpp
++    windowed_app_context_sdl.cpp
+ )
+ 
+ # Optional overlay dialogs
+@@ -55,18 +58,14 @@ if(REXGLUE_USE_D3D12)
+     )
+ endif()
+ 
+-# Platform-specific sources
++# Platform-specific sources (windowing itself is SDL3, platform-independent)
+ if(WIN32)
+     set(REXUI_PLATFORM_SOURCES
+         surface_win.cpp
+-        window_win.cpp
+-        windowed_app_context_win.cpp
+     )
+ else()
+     set(REXUI_PLATFORM_SOURCES
+         surface_gnulinux.cpp
+-        window_gtk.cpp
+-        windowed_app_context_gtk.cpp
+     )
+ endif()
+ 
+@@ -100,7 +99,9 @@ target_link_libraries(rexui PUBLIC
+     rexcore
+     renderdoc
+     imgui::imgui
++    SDL3::SDL3
+ )
++target_link_libraries(rexui PRIVATE utf8cpp)
+ 
+ if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include")
+     target_include_directories(rexui PRIVATE
+@@ -132,23 +133,21 @@ if(REXGLUE_USE_VULKAN)
+ endif()
+ 
+ # Platform-specific dependencies
+-if(WIN32)
+-    target_link_libraries(rexui PUBLIC
+-        dwmapi
+-        Shcore
+-    )
+-else()
++if(NOT WIN32)
+     find_package(PkgConfig REQUIRED)
+-    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+     pkg_check_modules(X11_XCB REQUIRED x11-xcb)
+ 
+-    target_include_directories(rexui PRIVATE
+-        ${GTK3_INCLUDE_DIRS}
++    # Required, not optional: vulkan/api.h pulls in <wayland-client.h> on every
++    # Linux build.
++    pkg_check_modules(WAYLAND REQUIRED wayland-client)
++
++    target_include_directories(rexui PUBLIC
+         ${X11_XCB_INCLUDE_DIRS}
++        ${WAYLAND_INCLUDE_DIRS}
+     )
+     target_link_libraries(rexui PUBLIC
+-        ${GTK3_LIBRARIES}
+         ${X11_XCB_LIBRARIES}
++        ${WAYLAND_LIBRARIES}
+     )
+ endif()
+ 
+diff --git a/thirdparty/rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp b/thirdparty/rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp
+index 200a47d0..6e472451 100644
+--- a/thirdparty/rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp
+@@ -427,9 +427,8 @@ D3D12Presenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_sur
+           return SurfacePaintConnectResult::kFailure;
+         }
+         // Disable automatic Alt+Enter handling - DXGI fullscreen doesn't
+-        // support ALLOW_TEARING, and using custom fullscreen in ui::Win32Window
+-        // anyway as with Alt+Enter the menu is kept, state changes are tracked
+-        // better, and nothing is presented for some reason.
++        // support ALLOW_TEARING, and the window implementation provides
++        // borderless fullscreen anyway with better state tracking.
+         dxgi_factory->MakeWindowAssociation(surface_hwnd, DXGI_MWA_NO_ALT_ENTER);
+       } break;
+ #endif
+diff --git a/thirdparty/rexglue-sdk/src/ui/menu_item.cpp b/thirdparty/rexglue-sdk/src/ui/menu_item.cpp
+index b9aca050..fdd93758 100644
+--- a/thirdparty/rexglue-sdk/src/ui/menu_item.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/menu_item.cpp
+@@ -27,6 +27,14 @@ std::unique_ptr<MenuItem> MenuItem::Create(Type type, const std::string& text,
+   return MenuItem::Create(type, text, "", std::move(callback));
+ }
+ 
++std::unique_ptr<MenuItem> MenuItem::Create(Type type, const std::string& text,
++                                           const std::string& hotkey,
++                                           std::function<void()> callback) {
++  // No native menu backend with SDL windowing; the plain item still carries
++  // text/hotkey/callback state for callers that walk the tree themselves.
++  return std::unique_ptr<MenuItem>(new MenuItem(type, text, hotkey, std::move(callback)));
++}
++
+ MenuItem::MenuItem(Type type, const std::string& text, const std::string& hotkey,
+                    std::function<void()> callback)
+     : type_(type),
+diff --git a/thirdparty/rexglue-sdk/src/ui/presenter.cpp b/thirdparty/rexglue-sdk/src/ui/presenter.cpp
+index b6dc208f..7360ed98 100644
+--- a/thirdparty/rexglue-sdk/src/ui/presenter.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/presenter.cpp
+@@ -26,10 +26,6 @@
+ #include <ffx_api/ffx_upscale.h>
+ #endif
+ 
+-#if REX_PLATFORM_WIN32
+-#include <rex/ui/window_win.h>
+-#endif
+-
+ REXCVAR_DEFINE_BOOL(host_present_from_non_ui_thread, true, "UI/Presenter",
+                     "Allow presentation from non-UI thread");
+ 
+@@ -1437,7 +1433,7 @@ void Presenter::UpdateSurfaceMonitorFromUIThread(bool old_monitor_potentially_di
+ #if REX_PLATFORM_WIN32
+   HMONITOR surface_new_win32_monitor = nullptr;
+   if (surface_) {
+-    HWND hwnd = static_cast<const Win32Window*>(window_)->hwnd();
++    HWND hwnd = static_cast<HWND>(window_->GetNativeWindowHandle());
+     // The HWND may be non-existent if the window has been closed and destroyed
+     // (the HWND, not the rex::ui::Window) already.
+     if (hwnd) {
+diff --git a/thirdparty/rexglue-sdk/src/ui/sdl_virtual_key.cpp b/thirdparty/rexglue-sdk/src/ui/sdl_virtual_key.cpp
+new file mode 100644
+index 00000000..3a152b81
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/src/ui/sdl_virtual_key.cpp
+@@ -0,0 +1,134 @@
++/**
++ * @file        ui/sdl_virtual_key.cpp
++ * @brief       SDL3 scancode to Win32-style VirtualKey translation
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#include <rex/ui/sdl_virtual_key.h>
++
++#include <cstdint>
++
++namespace rex::ui {
++
++VirtualKey TranslateSDLScancode(SDL_Scancode scancode) {
++  // Contiguous ranges in both encodings.
++  if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
++    return VirtualKey(uint32_t(VirtualKey::kA) + (scancode - SDL_SCANCODE_A));
++  }
++  if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9) {
++    return VirtualKey(uint32_t(VirtualKey::k0) + 1 + (scancode - SDL_SCANCODE_1));
++  }
++  if (scancode >= SDL_SCANCODE_F1 && scancode <= SDL_SCANCODE_F12) {
++    return VirtualKey(uint32_t(VirtualKey::kF1) + (scancode - SDL_SCANCODE_F1));
++  }
++  if (scancode >= SDL_SCANCODE_F13 && scancode <= SDL_SCANCODE_F24) {
++    return VirtualKey(uint32_t(VirtualKey::kF13) + (scancode - SDL_SCANCODE_F13));
++  }
++  if (scancode >= SDL_SCANCODE_KP_1 && scancode <= SDL_SCANCODE_KP_9) {
++    // SDL numpad order is 1..9,0; VK order is 0..9.
++    return VirtualKey(uint32_t(VirtualKey::kNumpad0) + 1 + (scancode - SDL_SCANCODE_KP_1));
++  }
++  switch (scancode) {
++    case SDL_SCANCODE_0:
++      return VirtualKey::k0;
++    case SDL_SCANCODE_KP_0:
++      return VirtualKey::kNumpad0;
++    case SDL_SCANCODE_RETURN:
++    case SDL_SCANCODE_KP_ENTER:
++      return VirtualKey::kReturn;
++    case SDL_SCANCODE_ESCAPE:
++      return VirtualKey::kEscape;
++    case SDL_SCANCODE_BACKSPACE:
++      return VirtualKey::kBack;
++    case SDL_SCANCODE_TAB:
++      return VirtualKey::kTab;
++    case SDL_SCANCODE_SPACE:
++      return VirtualKey::kSpace;
++    case SDL_SCANCODE_LEFT:
++      return VirtualKey::kLeft;
++    case SDL_SCANCODE_UP:
++      return VirtualKey::kUp;
++    case SDL_SCANCODE_RIGHT:
++      return VirtualKey::kRight;
++    case SDL_SCANCODE_DOWN:
++      return VirtualKey::kDown;
++    case SDL_SCANCODE_PAGEUP:
++      return VirtualKey::kPrior;
++    case SDL_SCANCODE_PAGEDOWN:
++      return VirtualKey::kNext;
++    case SDL_SCANCODE_HOME:
++      return VirtualKey::kHome;
++    case SDL_SCANCODE_END:
++      return VirtualKey::kEnd;
++    case SDL_SCANCODE_INSERT:
++      return VirtualKey::kInsert;
++    case SDL_SCANCODE_DELETE:
++      return VirtualKey::kDelete;
++    case SDL_SCANCODE_LSHIFT:
++    case SDL_SCANCODE_RSHIFT:
++      return VirtualKey::kShift;
++    case SDL_SCANCODE_LCTRL:
++    case SDL_SCANCODE_RCTRL:
++      return VirtualKey::kControl;
++    case SDL_SCANCODE_LALT:
++    case SDL_SCANCODE_RALT:
++      return VirtualKey::kMenu;
++    case SDL_SCANCODE_LGUI:
++      return VirtualKey::kLWin;
++    case SDL_SCANCODE_RGUI:
++      return VirtualKey::kRWin;
++    case SDL_SCANCODE_APPLICATION:
++      return VirtualKey::kApps;
++    case SDL_SCANCODE_CAPSLOCK:
++      return VirtualKey::kCapital;
++    case SDL_SCANCODE_PAUSE:
++      return VirtualKey::kPause;
++    case SDL_SCANCODE_PRINTSCREEN:
++      return VirtualKey::kSnapshot;
++    case SDL_SCANCODE_SCROLLLOCK:
++      return VirtualKey::kScroll;
++    case SDL_SCANCODE_NUMLOCKCLEAR:
++      return VirtualKey::kNumLock;
++    case SDL_SCANCODE_KP_MULTIPLY:
++      return VirtualKey::kMultiply;
++    case SDL_SCANCODE_KP_PLUS:
++      return VirtualKey::kAdd;
++    case SDL_SCANCODE_KP_MINUS:
++      return VirtualKey::kSubtract;
++    case SDL_SCANCODE_KP_PERIOD:
++      return VirtualKey::kDecimal;
++    case SDL_SCANCODE_KP_DIVIDE:
++      return VirtualKey::kDivide;
++    case SDL_SCANCODE_SEMICOLON:
++      return VirtualKey::kOem1;
++    case SDL_SCANCODE_EQUALS:
++      return VirtualKey::kOemPlus;
++    case SDL_SCANCODE_COMMA:
++      return VirtualKey::kOemComma;
++    case SDL_SCANCODE_MINUS:
++      return VirtualKey::kOemMinus;
++    case SDL_SCANCODE_PERIOD:
++      return VirtualKey::kOemPeriod;
++    case SDL_SCANCODE_SLASH:
++      return VirtualKey::kOem2;
++    case SDL_SCANCODE_GRAVE:
++      return VirtualKey::kOem3;
++    case SDL_SCANCODE_LEFTBRACKET:
++      return VirtualKey::kOem4;
++    case SDL_SCANCODE_BACKSLASH:
++      return VirtualKey::kOem5;
++    case SDL_SCANCODE_RIGHTBRACKET:
++      return VirtualKey::kOem6;
++    case SDL_SCANCODE_APOSTROPHE:
++      return VirtualKey::kOem7;
++    default:
++      return VirtualKey::kNone;
++  }
++}
++
++}  // namespace rex::ui
+diff --git a/thirdparty/rexglue-sdk/src/ui/surface_gnulinux.cpp b/thirdparty/rexglue-sdk/src/ui/surface_gnulinux.cpp
+index a6ea800d..c6f57300 100644
+--- a/thirdparty/rexglue-sdk/src/ui/surface_gnulinux.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/surface_gnulinux.cpp
+@@ -11,6 +11,8 @@
+ 
+ #include <cstdlib>
+ 
++#include <SDL3/SDL.h>
++
+ #include <rex/ui/surface_gnulinux.h>
+ 
+ namespace rex {
+@@ -28,5 +30,15 @@ bool XcbWindowSurface::GetSizeImpl(uint32_t& width_out, uint32_t& height_out) co
+   return true;
+ }
+ 
++bool WaylandSurface::GetSizeImpl(uint32_t& width_out, uint32_t& height_out) const {
++  int w = 0, h = 0;
++  if (!SDL_GetWindowSizeInPixels(sdl_window_, &w, &h) || w <= 0 || h <= 0) {
++    return false;
++  }
++  width_out = uint32_t(w);
++  height_out = uint32_t(h);
++  return true;
++}
++
+ }  // namespace ui
+ }  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_instance.cpp b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_instance.cpp
+index 0d2ded39..d87e13f1 100644
+--- a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_instance.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_instance.cpp
+@@ -107,6 +107,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
+     requested_extensions.emplace("VK_KHR_xcb_surface",
+                                  &vulkan_instance->extensions_.ext_KHR_xcb_surface);
+ #endif
++#ifdef VK_USE_PLATFORM_WAYLAND_KHR
++    // #7.
++    requested_extensions.emplace("VK_KHR_wayland_surface",
++                                 &vulkan_instance->extensions_.ext_KHR_wayland_surface);
++#endif
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+     // #9.
+     requested_extensions.emplace("VK_KHR_android_surface",
+@@ -370,6 +375,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
+ #include <rex/ui/vulkan/functions/instance_khr_xcb_surface.inc>
+   }
+ #endif
++#ifdef VK_USE_PLATFORM_WAYLAND_KHR
++  if (vulkan_instance->extensions_.ext_KHR_wayland_surface) {
++#include <rex/ui/vulkan/functions/instance_khr_wayland_surface.inc>
++  }
++#endif
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+   if (vulkan_instance->extensions_.ext_KHR_android_surface) {
+ #include <rex/ui/vulkan/functions/instance_khr_android_surface.inc>
+diff --git a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp
+index aa2ad82d..e4df886e 100644
+--- a/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp
+@@ -582,6 +582,9 @@ Surface::TypeFlags VulkanPresenter::GetSurfaceTypesSupportedByInstance(
+   }
+ #endif
+ #if REX_PLATFORM_GNU_LINUX
++  if (instance_extensions.ext_KHR_wayland_surface) {
++    type_flags |= Surface::kTypeFlag_WaylandSurface;
++  }
+   if (instance_extensions.ext_KHR_xcb_surface) {
+     type_flags |= Surface::kTypeFlag_XcbWindow;
+   }
+@@ -966,6 +969,17 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
+         vulkan_surface_create_result = ifn.vkCreateXcbSurfaceKHR(
+             instance, &surface_create_info, nullptr, &paint_context_.vulkan_surface);
+       } break;
++      case Surface::kTypeIndex_WaylandSurface: {
++        auto& wayland_surface = static_cast<const WaylandSurface&>(new_surface);
++        VkWaylandSurfaceCreateInfoKHR surface_create_info;
++        surface_create_info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
++        surface_create_info.pNext = nullptr;
++        surface_create_info.flags = 0;
++        surface_create_info.display = wayland_surface.display();
++        surface_create_info.surface = wayland_surface.surface();
++        vulkan_surface_create_result = ifn.vkCreateWaylandSurfaceKHR(
++            instance, &surface_create_info, nullptr, &paint_context_.vulkan_surface);
++      } break;
+ #endif
+ #if REX_PLATFORM_WIN32
+       case Surface::kTypeIndex_Win32Hwnd: {
+diff --git a/thirdparty/rexglue-sdk/src/ui/window.cpp b/thirdparty/rexglue-sdk/src/ui/window.cpp
+index d8dfee5b..7e331890 100644
+--- a/thirdparty/rexglue-sdk/src/ui/window.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/window.cpp
+@@ -34,6 +34,11 @@ REXCVAR_DEFINE_INT32(window_height, 0, "UI/Window",
+ REXCVAR_DEFINE_BOOL(fullscreen, true, "UI/Window", "Start the window in fullscreen mode")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
++REXCVAR_DEFINE_STRING(video_driver, "", "UI/Window",
++                      "SDL video driver to use, such as \"wayland\" or \"x11\". Empty picks "
++                      "SDL's default for the session")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++
+ REXCVAR_DEFINE_INT32(monitor, 0, "UI/Window",
+                      "Monitor index to display on (0 = default, 1 = primary, 2 = "
+                      "second monitor, etc.)")
+@@ -445,9 +450,16 @@ void Window::OnSurfaceChanged(bool new_surface_potentially_exists) {
+     return;
+   }
+ 
+-  presenter_surface_ = CreateSurface(presenter_->GetSupportedSurfaceTypes());
++  Surface::TypeFlags supported_types = presenter_->GetSupportedSurfaceTypes();
++  presenter_surface_ = CreateSurface(supported_types);
+   if (presenter_surface_) {
+     presenter_->SetWindowSurfaceFromUIThread(this, presenter_surface_.get());
++  } else if (phase_ == Phase::kOpen) {
++    // Usually a session whose native surface extension the driver lacks.
++    REXLOG_ERROR(
++        "No presentable surface for this window. The graphics provider supports surface types "
++        "{:#x}. Set the video_driver cvar to force a different session type.",
++        supported_types);
+   }
+ }
+ 
+@@ -551,6 +563,42 @@ void Window::OnFocusUpdate(bool new_has_focus, WindowDestructionReceiver& destru
+   }
+ }
+ 
++bool Window::SendCloseRequestToListeners(WindowDestructionReceiver& destruction_receiver) {
++  if (!CanSendEventsToListeners()) {
++    return true;
++  }
++  UIEvent e(this);
++  // Snapshot: listeners may add/remove listeners or destroy the window from
++  // within the callback, and a veto must stop iteration immediately.
++  std::vector<WindowListener*> listeners(listeners_);
++  for (WindowListener* listener : listeners) {
++    bool proceed = listener->OnCloseRequested(e);
++    if (destruction_receiver.IsWindowDestroyed()) {
++      return false;
++    }
++    if (!proceed) {
++      return false;
++    }
++  }
++  return true;
++}
++
++void Window::OnMinimized(WindowDestructionReceiver& destruction_receiver) {
++  if (!CanSendEventsToListeners()) {
++    return;
++  }
++  UIEvent e(this);
++  SendEventToListeners([&e](auto listener) { listener->OnMinimized(e); }, destruction_receiver);
++}
++
++void Window::OnRestored(WindowDestructionReceiver& destruction_receiver) {
++  if (!CanSendEventsToListeners()) {
++    return;
++  }
++  UIEvent e(this);
++  SendEventToListeners([&e](auto listener) { listener->OnRestored(e); }, destruction_receiver);
++}
++
+ void Window::OnPaint(bool force_paint) {
+   if (is_painting_) {
+     return;
+diff --git a/thirdparty/rexglue-sdk/src/ui/window_gtk.cpp b/thirdparty/rexglue-sdk/src/ui/window_gtk.cpp
+deleted file mode 100644
+index f7290673..00000000
+--- a/thirdparty/rexglue-sdk/src/ui/window_gtk.cpp
++++ /dev/null
+@@ -1,963 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2022 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <algorithm>
+-#include <string>
+-
+-#include <rex/assert.h>
+-#include <rex/cvar.h>
+-#include <rex/graphics/flags.h>
+-#include <rex/graphics/video_mode_util.h>
+-#include <rex/logging.h>
+-#include <rex/platform.h>
+-#include <rex/ui/flags.h>
+-#include <rex/ui/surface_gnulinux.h>
+-#include <rex/ui/virtual_key.h>
+-#include <rex/ui/window_gtk.h>
+-
+-#include <X11/Xlib-xcb.h>
+-#include <gdk/gdkx.h>
+-#include <xcb/xcb.h>
+-
+-namespace {
+-
+-uint32_t ResolveWindowWidth(uint32_t requested_width) {
+-  if (REXCVAR_GET(window_width) > 0) {
+-    return uint32_t(REXCVAR_GET(window_width));
+-  }
+-  if (!rex::cvar::HasNonDefaultValue("window_width")) {
+-    if (rex::cvar::HasNonDefaultValue("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
+-      return uint32_t(std::clamp(REXCVAR_GET(video_mode_width), 1, 8192));
+-    }
+-    int32_t preset_width = 0;
+-    int32_t preset_height = 0;
+-    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+-                                                                       preset_height)) {
+-      return uint32_t(std::clamp(preset_width, 1, 8192));
+-    }
+-  }
+-  return requested_width;
+-}
+-
+-uint32_t ResolveWindowHeight(uint32_t requested_height) {
+-  if (REXCVAR_GET(window_height) > 0) {
+-    return uint32_t(REXCVAR_GET(window_height));
+-  }
+-  if (!rex::cvar::HasNonDefaultValue("window_height")) {
+-    if (rex::cvar::HasNonDefaultValue("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
+-      return uint32_t(std::clamp(REXCVAR_GET(video_mode_height), 1, 8192));
+-    }
+-    int32_t preset_width = 0;
+-    int32_t preset_height = 0;
+-    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+-                                                                       preset_height)) {
+-      return uint32_t(std::clamp(preset_height, 1, 8192));
+-    }
+-  }
+-  return requested_height;
+-}
+-
+-using rex::ui::VirtualKey;
+-
+-VirtualKey TranslateGdkKeyvalToVirtualKey(guint keyval) {
+-  switch (keyval) {
+-    // Function keys.
+-    case GDK_KEY_F1:
+-      return VirtualKey::kF1;
+-    case GDK_KEY_F2:
+-      return VirtualKey::kF2;
+-    case GDK_KEY_F3:
+-      return VirtualKey::kF3;
+-    case GDK_KEY_F4:
+-      return VirtualKey::kF4;
+-    case GDK_KEY_F5:
+-      return VirtualKey::kF5;
+-    case GDK_KEY_F6:
+-      return VirtualKey::kF6;
+-    case GDK_KEY_F7:
+-      return VirtualKey::kF7;
+-    case GDK_KEY_F8:
+-      return VirtualKey::kF8;
+-    case GDK_KEY_F9:
+-      return VirtualKey::kF9;
+-    case GDK_KEY_F10:
+-      return VirtualKey::kF10;
+-    case GDK_KEY_F11:
+-      return VirtualKey::kF11;
+-    case GDK_KEY_F12:
+-      return VirtualKey::kF12;
+-    case GDK_KEY_F13:
+-      return VirtualKey::kF13;
+-    case GDK_KEY_F14:
+-      return VirtualKey::kF14;
+-    case GDK_KEY_F15:
+-      return VirtualKey::kF15;
+-    case GDK_KEY_F16:
+-      return VirtualKey::kF16;
+-    case GDK_KEY_F17:
+-      return VirtualKey::kF17;
+-    case GDK_KEY_F18:
+-      return VirtualKey::kF18;
+-    case GDK_KEY_F19:
+-      return VirtualKey::kF19;
+-    case GDK_KEY_F20:
+-      return VirtualKey::kF20;
+-    case GDK_KEY_F21:
+-      return VirtualKey::kF21;
+-    case GDK_KEY_F22:
+-      return VirtualKey::kF22;
+-    case GDK_KEY_F23:
+-      return VirtualKey::kF23;
+-    case GDK_KEY_F24:
+-      return VirtualKey::kF24;
+-
+-    // Control and navigation.
+-    case GDK_KEY_Escape:
+-      return VirtualKey::kEscape;
+-    case GDK_KEY_Return:
+-    case GDK_KEY_ISO_Enter:
+-    case GDK_KEY_KP_Enter:
+-      return VirtualKey::kReturn;
+-    case GDK_KEY_space:
+-    case GDK_KEY_KP_Space:
+-      return VirtualKey::kSpace;
+-    case GDK_KEY_Tab:
+-    case GDK_KEY_ISO_Left_Tab:
+-      return VirtualKey::kTab;
+-    case GDK_KEY_BackSpace:
+-      return VirtualKey::kBack;
+-    case GDK_KEY_Delete:
+-    case GDK_KEY_KP_Delete:
+-      return VirtualKey::kDelete;
+-    case GDK_KEY_Insert:
+-    case GDK_KEY_KP_Insert:
+-      return VirtualKey::kInsert;
+-    case GDK_KEY_Home:
+-    case GDK_KEY_KP_Home:
+-      return VirtualKey::kHome;
+-    case GDK_KEY_End:
+-    case GDK_KEY_KP_End:
+-      return VirtualKey::kEnd;
+-    case GDK_KEY_Page_Up:
+-    case GDK_KEY_KP_Page_Up:
+-      return VirtualKey::kPrior;
+-    case GDK_KEY_Page_Down:
+-    case GDK_KEY_KP_Page_Down:
+-      return VirtualKey::kNext;
+-    case GDK_KEY_Left:
+-    case GDK_KEY_KP_Left:
+-      return VirtualKey::kLeft;
+-    case GDK_KEY_Right:
+-    case GDK_KEY_KP_Right:
+-      return VirtualKey::kRight;
+-    case GDK_KEY_Up:
+-    case GDK_KEY_KP_Up:
+-      return VirtualKey::kUp;
+-    case GDK_KEY_Down:
+-    case GDK_KEY_KP_Down:
+-      return VirtualKey::kDown;
+-
+-    // Modifiers and lock keys.
+-    case GDK_KEY_Shift_L:
+-    case GDK_KEY_Shift_R:
+-      return VirtualKey::kShift;
+-    case GDK_KEY_Control_L:
+-    case GDK_KEY_Control_R:
+-      return VirtualKey::kControl;
+-    case GDK_KEY_Alt_L:
+-    case GDK_KEY_Alt_R:
+-    case GDK_KEY_Meta_L:
+-    case GDK_KEY_Meta_R:
+-      return VirtualKey::kMenu;
+-    case GDK_KEY_Super_L:
+-      return VirtualKey::kLWin;
+-    case GDK_KEY_Super_R:
+-      return VirtualKey::kRWin;
+-    case GDK_KEY_Menu:
+-      return VirtualKey::kApps;
+-    case GDK_KEY_Caps_Lock:
+-      return VirtualKey::kCapital;
+-    case GDK_KEY_Num_Lock:
+-      return VirtualKey::kNumLock;
+-    case GDK_KEY_Scroll_Lock:
+-      return VirtualKey::kScroll;
+-    case GDK_KEY_Print:
+-      return VirtualKey::kSnapshot;
+-    case GDK_KEY_Pause:
+-      return VirtualKey::kPause;
+-
+-    // Numeric row.
+-    case GDK_KEY_0:
+-      return VirtualKey::k0;
+-    case GDK_KEY_1:
+-      return VirtualKey::k1;
+-    case GDK_KEY_2:
+-      return VirtualKey::k2;
+-    case GDK_KEY_3:
+-      return VirtualKey::k3;
+-    case GDK_KEY_4:
+-      return VirtualKey::k4;
+-    case GDK_KEY_5:
+-      return VirtualKey::k5;
+-    case GDK_KEY_6:
+-      return VirtualKey::k6;
+-    case GDK_KEY_7:
+-      return VirtualKey::k7;
+-    case GDK_KEY_8:
+-      return VirtualKey::k8;
+-    case GDK_KEY_9:
+-      return VirtualKey::k9;
+-
+-    // Numpad.
+-    case GDK_KEY_KP_0:
+-      return VirtualKey::kNumpad0;
+-    case GDK_KEY_KP_1:
+-      return VirtualKey::kNumpad1;
+-    case GDK_KEY_KP_2:
+-      return VirtualKey::kNumpad2;
+-    case GDK_KEY_KP_3:
+-      return VirtualKey::kNumpad3;
+-    case GDK_KEY_KP_4:
+-      return VirtualKey::kNumpad4;
+-    case GDK_KEY_KP_5:
+-      return VirtualKey::kNumpad5;
+-    case GDK_KEY_KP_6:
+-      return VirtualKey::kNumpad6;
+-    case GDK_KEY_KP_7:
+-      return VirtualKey::kNumpad7;
+-    case GDK_KEY_KP_8:
+-      return VirtualKey::kNumpad8;
+-    case GDK_KEY_KP_9:
+-      return VirtualKey::kNumpad9;
+-    case GDK_KEY_KP_Add:
+-      return VirtualKey::kAdd;
+-    case GDK_KEY_KP_Subtract:
+-      return VirtualKey::kSubtract;
+-    case GDK_KEY_KP_Multiply:
+-      return VirtualKey::kMultiply;
+-    case GDK_KEY_KP_Divide:
+-      return VirtualKey::kDivide;
+-    case GDK_KEY_KP_Decimal:
+-      return VirtualKey::kDecimal;
+-
+-    // Punctuation.
+-    case GDK_KEY_grave:
+-    case GDK_KEY_asciitilde:
+-      return VirtualKey::kOem3;
+-    case GDK_KEY_minus:
+-    case GDK_KEY_underscore:
+-      return VirtualKey::kOemMinus;
+-    case GDK_KEY_equal:
+-    case GDK_KEY_plus:
+-      return VirtualKey::kOemPlus;
+-    case GDK_KEY_comma:
+-    case GDK_KEY_less:
+-      return VirtualKey::kOemComma;
+-    case GDK_KEY_period:
+-    case GDK_KEY_greater:
+-      return VirtualKey::kOemPeriod;
+-    case GDK_KEY_semicolon:
+-    case GDK_KEY_colon:
+-      return VirtualKey::kOem1;
+-    case GDK_KEY_slash:
+-    case GDK_KEY_question:
+-      return VirtualKey::kOem2;
+-    case GDK_KEY_backslash:
+-    case GDK_KEY_bar:
+-      return VirtualKey::kOem5;
+-    case GDK_KEY_bracketleft:
+-    case GDK_KEY_braceleft:
+-      return VirtualKey::kOem4;
+-    case GDK_KEY_bracketright:
+-    case GDK_KEY_braceright:
+-      return VirtualKey::kOem6;
+-    case GDK_KEY_apostrophe:
+-    case GDK_KEY_quotedbl:
+-      return VirtualKey::kOem7;
+-
+-    default:
+-      break;
+-  }
+-
+-  if (keyval >= GDK_KEY_a && keyval <= GDK_KEY_z) {
+-    return VirtualKey(uint16_t(VirtualKey::kA) + uint16_t(keyval - GDK_KEY_a));
+-  }
+-  if (keyval >= GDK_KEY_A && keyval <= GDK_KEY_Z) {
+-    return VirtualKey(uint16_t(VirtualKey::kA) + uint16_t(keyval - GDK_KEY_A));
+-  }
+-
+-  return VirtualKey::kNone;
+-}
+-
+-}  // namespace
+-
+-namespace rex {
+-namespace ui {
+-
+-std::unique_ptr<Window> Window::Create(WindowedAppContext& app_context,
+-                                       const std::string_view title, uint32_t desired_logical_width,
+-                                       uint32_t desired_logical_height) {
+-  desired_logical_width = ResolveWindowWidth(desired_logical_width);
+-  desired_logical_height = ResolveWindowHeight(desired_logical_height);
+-  return std::make_unique<GTKWindow>(app_context, title, desired_logical_width,
+-                                     desired_logical_height);
+-}
+-
+-GTKWindow::GTKWindow(WindowedAppContext& app_context, const std::string_view title,
+-                     uint32_t desired_logical_width, uint32_t desired_logical_height)
+-    : Window(app_context, title, desired_logical_width, desired_logical_height) {}
+-
+-GTKWindow::~GTKWindow() {
+-  EnterDestructor();
+-  if (window_) {
+-    // Set window_ to null to ignore events from now on since this ui::GTKWindow
+-    // is entering an indeterminate state.
+-    GtkWidget* window = window_;
+-    window_ = nullptr;
+-    // Destroying the top-level window also destroys its children.
+-    drawing_area_ = nullptr;
+-    box_ = nullptr;
+-    gtk_widget_destroy(window);
+-  }
+-}
+-
+-bool GTKWindow::OpenImpl() {
+-  window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+-
+-  gtk_window_set_title(GTK_WINDOW(window_), GetTitle().c_str());
+-
+-  // Create the vertical box container for the main menu and the drawing area.
+-  box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+-  gtk_container_add(GTK_CONTAINER(window_), box_);
+-
+-  // Add the main menu (even if fullscreen was requested, for the initial layout
+-  // calculation).
+-  const GTKMenuItem* main_menu = static_cast<const GTKMenuItem*>(GetMainMenu());
+-  GtkWidget* main_menu_widget = main_menu ? main_menu->handle() : nullptr;
+-  if (main_menu_widget) {
+-    gtk_box_pack_start(GTK_BOX(box_), main_menu_widget, FALSE, FALSE, 0);
+-  }
+-
+-  // Create the drawing area for creating the surface for, which will be the
+-  // client area of the window occupying all the window space not taken by the
+-  // main menu.
+-  drawing_area_ = gtk_drawing_area_new();
+-  gtk_box_pack_end(GTK_BOX(box_), drawing_area_, TRUE, TRUE, 0);
+-  // The desired size is the client (drawing) area size. Let GTK auto-size the
+-  // entire window around it (as well as the width of the menu actually if it
+-  // happens to be bigger - the desired size in the Window will be updated later
+-  // to reflect that).
+-  gtk_widget_set_size_request(drawing_area_, GetDesiredLogicalWidth(), GetDesiredLogicalHeight());
+-
+-  // Attach the event handlers.
+-  // Keyboard events are processed by the window, mouse events are processed
+-  // within, and by, the drawing (client) area.
+-  gtk_widget_set_events(window_, GDK_KEY_PRESS_MASK | GDK_KEY_RELEASE_MASK | GDK_FOCUS_CHANGE_MASK);
+-  gtk_widget_set_events(drawing_area_, GDK_POINTER_MOTION_MASK | GDK_BUTTON_MOTION_MASK |
+-                                           GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
+-                                           GDK_SCROLL_MASK);
+-  g_signal_connect(G_OBJECT(window_), "event", G_CALLBACK(WindowEventHandlerThunk),
+-                   reinterpret_cast<gpointer>(this));
+-  g_signal_connect(G_OBJECT(drawing_area_), "event", G_CALLBACK(DrawingAreaEventHandlerThunk),
+-                   reinterpret_cast<gpointer>(this));
+-  g_signal_connect(G_OBJECT(drawing_area_), "draw", G_CALLBACK(DrawHandler),
+-                   reinterpret_cast<gpointer>(this));
+-
+-  // Finally show all the widgets in the window, including the main menu.
+-  gtk_widget_show_all(window_);
+-
+-  // Remove the size request after finishing the initial layout because it makes
+-  // it impossible to make the window smaller.
+-  gtk_widget_set_size_request(drawing_area_, -1, -1);
+-
+-  // Move the window to the requested monitor before entering fullscreen.
+-  if (int32_t monitor_index = REXCVAR_GET(monitor); monitor_index > 0) {
+-    GdkDisplay* display = gtk_widget_get_display(window_);
+-    GdkScreen* screen = gdk_display_get_default_screen(display);
+-    int n_monitors = gdk_screen_get_n_monitors(screen);
+-    if (monitor_index <= n_monitors) {
+-      GdkRectangle geom;
+-      gdk_screen_get_monitor_geometry(screen, monitor_index - 1, &geom);
+-      gtk_window_move(GTK_WINDOW(window_), geom.x + (geom.width - GetDesiredLogicalWidth()) / 2,
+-                      geom.y + (geom.height - GetDesiredLogicalHeight()) / 2);
+-    }
+-  }
+-
+-  // After setting up the initial layout for non-fullscreen, enter fullscreen if
+-  // requested.
+-  if (IsFullscreen()) {
+-    if (main_menu_widget) {
+-      gtk_container_remove(GTK_CONTAINER(box_), main_menu_widget);
+-    }
+-    gtk_window_fullscreen(GTK_WINDOW(window_));
+-  }
+-
+-  // Make sure the initial state after opening is reported to the common Window
+-  // class no matter how GTK sends the events.
+-  {
+-    WindowDestructionReceiver destruction_receiver(this);
+-
+-    // TODO(Triang3l): Report the desired client area size.
+-
+-    GtkAllocation drawing_area_allocation;
+-    gtk_widget_get_allocation(drawing_area_, &drawing_area_allocation);
+-    OnActualSizeUpdate(uint32_t(drawing_area_allocation.width),
+-                       uint32_t(drawing_area_allocation.height), destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      return true;
+-    }
+-
+-    if (gtk_window_has_toplevel_focus(GTK_WINDOW(window_))) {
+-      OnFocusUpdate(true, destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        return true;
+-      }
+-    }
+-  }
+-
+-  return true;
+-}
+-
+-void GTKWindow::RequestCloseImpl() {
+-  gtk_window_close(GTK_WINDOW(window_));
+-}
+-
+-void GTKWindow::ApplyNewFullscreen() {
+-  // Various functions here may trigger events that may result in the listeners
+-  // being invoked, and potentially cause the destruction of the window or
+-  // fullscreen being toggled from inside this function.
+-  WindowDestructionReceiver destruction_receiver(this);
+-
+-  const GTKMenuItem* main_menu = static_cast<const GTKMenuItem*>(GetMainMenu());
+-  GtkWidget* main_menu_widget = main_menu ? main_menu->handle() : nullptr;
+-
+-  // Changing the menu and the fullscreen state may change the size of the
+-  // drawing area too, don't handle the resize multiple times (also potentially
+-  // with the listeners changing the desired fullscreen if called from the
+-  // handling of some event like GDK_CONFIGURE).
+-  BeginBatchedSizeUpdate();
+-
+-  if (IsFullscreen()) {
+-    if (main_menu_widget) {
+-      gtk_container_remove(GTK_CONTAINER(box_), main_menu_widget);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        if (!destruction_receiver.IsWindowDestroyed()) {
+-          EndBatchedSizeUpdate(destruction_receiver);
+-        }
+-        return;
+-      }
+-    }
+-    gtk_window_fullscreen(GTK_WINDOW(window_));
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-  } else {
+-    gtk_window_unfullscreen(GTK_WINDOW(window_));
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-    if (main_menu_widget) {
+-      gtk_box_pack_start(GTK_BOX(box_), main_menu_widget, FALSE, FALSE, 0);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        if (!destruction_receiver.IsWindowDestroyed()) {
+-          EndBatchedSizeUpdate(destruction_receiver);
+-        }
+-        return;
+-      }
+-      // If the new menu is used for the first time, it will be in the hidden
+-      // state initially. The menu might have been changed while in fullscreen
+-      // without having shown it.
+-      gtk_widget_show_all(main_menu_widget);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        if (!destruction_receiver.IsWindowDestroyed()) {
+-          EndBatchedSizeUpdate(destruction_receiver);
+-        }
+-        return;
+-      }
+-    }
+-  }
+-
+-  EndBatchedSizeUpdate(destruction_receiver);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void GTKWindow::ApplyNewTitle() {
+-  gtk_window_set_title(GTK_WINDOW(window_), GetTitle().c_str());
+-}
+-
+-void GTKWindow::ApplyNewMainMenu(MenuItem* old_main_menu) {
+-  if (IsFullscreen()) {
+-    // The menu will be set when exiting fullscreen.
+-    return;
+-  }
+-  // The fullscreen state may have been changed by some callback invoked, such
+-  // as the configure (resize) one, recheck it after making changes also.
+-
+-  WindowDestructionReceiver destruction_receiver(this);
+-
+-  // Changing the menu may change the size of the drawing area too, and here the
+-  // menu may be changed twice (to detach the old one and to attach the new),
+-  // don't handle the resize multiple times.
+-  BeginBatchedSizeUpdate();
+-
+-  if (old_main_menu) {
+-    const GTKMenuItem& old_gtk_main_menu = *static_cast<const GTKMenuItem*>(old_main_menu);
+-    gtk_container_remove(GTK_CONTAINER(box_), old_gtk_main_menu.handle());
+-    if (destruction_receiver.IsWindowDestroyedOrClosed() || IsFullscreen()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-  }
+-
+-  const GTKMenuItem* new_main_menu = static_cast<const GTKMenuItem*>(GetMainMenu());
+-  if (!new_main_menu) {
+-    EndBatchedSizeUpdate(destruction_receiver);
+-    return;
+-  }
+-  GtkWidget* new_main_menu_widget = new_main_menu->handle();
+-  gtk_box_pack_start(GTK_BOX(box_), new_main_menu_widget, FALSE, FALSE, 0);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed() || IsFullscreen()) {
+-    if (!destruction_receiver.IsWindowDestroyed()) {
+-      EndBatchedSizeUpdate(destruction_receiver);
+-    }
+-    return;
+-  }
+-  // If the new menu is used for the first time, it will be in the hidden state
+-  // initially.
+-  gtk_widget_show_all(new_main_menu_widget);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed() || IsFullscreen()) {
+-    if (!destruction_receiver.IsWindowDestroyed()) {
+-      EndBatchedSizeUpdate(destruction_receiver);
+-    }
+-    return;
+-  }
+-
+-  EndBatchedSizeUpdate(destruction_receiver);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void GTKWindow::FocusImpl() {
+-  gtk_window_activate_focus(GTK_WINDOW(window_));
+-}
+-
+-std::unique_ptr<Surface> GTKWindow::CreateSurfaceImpl(Surface::TypeFlags allowed_types) {
+-  GdkDisplay* display = gtk_widget_get_display(window_);
+-  GdkWindow* drawing_area_window = gtk_widget_get_window(drawing_area_);
+-  bool type_known = false;
+-  bool type_supported_by_display = false;
+-  if (allowed_types & Surface::kTypeFlag_XcbWindow) {
+-    type_known = true;
+-    if (GDK_IS_X11_DISPLAY(display)) {
+-      type_supported_by_display = true;
+-      return std::make_unique<XcbWindowSurface>(
+-          XGetXCBConnection(gdk_x11_display_get_xdisplay(display)),
+-          gdk_x11_window_get_xid(drawing_area_window));
+-    }
+-  }
+-  // TODO(Triang3l): Wayland surface.
+-  if (type_known && !type_supported_by_display) {
+-    REXLOG_ERROR(
+-        "GTKWindow: The window system of the GTK window is not supported by "
+-        "Xenia");
+-  }
+-  return nullptr;
+-}
+-
+-void GTKWindow::RequestPaintImpl() {
+-  gtk_widget_queue_draw(drawing_area_);
+-}
+-
+-void GTKWindow::HandleSizeUpdate(WindowDestructionReceiver& destruction_receiver) {
+-  if (!drawing_area_) {
+-    // Batched size update ended when the window has already been closed, for
+-    // instance.
+-    return;
+-  }
+-
+-  // TODO(Triang3l): Report the desired client area size.
+-
+-  GtkAllocation drawing_area_allocation;
+-  gtk_widget_get_allocation(drawing_area_, &drawing_area_allocation);
+-  OnActualSizeUpdate(uint32_t(drawing_area_allocation.width),
+-                     uint32_t(drawing_area_allocation.height), destruction_receiver);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void GTKWindow::BeginBatchedSizeUpdate() {
+-  // It's okay if batched_size_update_contained_* are not false when beginning
+-  // a batched update, in case the new batched update was started by a window
+-  // listener called from within EndBatchedSizeUpdate.
+-  ++batched_size_update_depth_;
+-}
+-
+-void GTKWindow::EndBatchedSizeUpdate(WindowDestructionReceiver& destruction_receiver) {
+-  assert_not_zero(batched_size_update_depth_);
+-  if (--batched_size_update_depth_) {
+-    return;
+-  }
+-  // Resetting batched_size_update_contained_* in closing, not opening, because
+-  // a listener may start a new batch, and finish it, and there won't be need to
+-  // handle the deferred messages twice.
+-  if (batched_size_update_contained_configure_) {
+-    batched_size_update_contained_configure_ = false;
+-    HandleSizeUpdate(destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyed()) {
+-      return;
+-    }
+-  }
+-  if (batched_size_update_contained_draw_) {
+-    batched_size_update_contained_draw_ = false;
+-    RequestPaint();
+-  }
+-}
+-
+-bool GTKWindow::HandleMouse(GdkEvent* event, WindowDestructionReceiver& destruction_receiver) {
+-  MouseEvent::Button button = MouseEvent::Button::kNone;
+-  int32_t x = 0;
+-  int32_t y = 0;
+-  int32_t scroll_x = 0;
+-  int32_t scroll_y = 0;
+-  switch (event->type) {
+-    case GDK_MOTION_NOTIFY: {
+-      auto motion_event = reinterpret_cast<const GdkEventMotion*>(event);
+-      x = motion_event->x;
+-      y = motion_event->y;
+-    } break;
+-    case GDK_BUTTON_PRESS:
+-    case GDK_BUTTON_RELEASE: {
+-      auto button_event = reinterpret_cast<const GdkEventButton*>(event);
+-      switch (button_event->button) {
+-        case 1:
+-          button = MouseEvent::Button::kLeft;
+-          break;
+-        case 2:
+-          button = MouseEvent::Button::kMiddle;
+-          break;
+-        case 3:
+-          button = MouseEvent::Button::kRight;
+-          break;
+-        case 4:
+-          button = MouseEvent::Button::kX1;
+-          break;
+-        case 5:
+-          button = MouseEvent::Button::kX2;
+-          break;
+-        default:
+-          // Still handle the movement.
+-          break;
+-      }
+-      x = button_event->x;
+-      y = button_event->y;
+-    } break;
+-    case GDK_SCROLL: {
+-      auto scroll_event = reinterpret_cast<const GdkEventScroll*>(event);
+-      x = scroll_event->x;
+-      y = scroll_event->y;
+-      scroll_x = scroll_event->delta_x * MouseEvent::kScrollPerDetent;
+-      // In GDK, positive is towards the bottom of the screen, not forward from
+-      // the user.
+-      scroll_y = -scroll_event->delta_y * MouseEvent::kScrollPerDetent;
+-    } break;
+-    default:
+-      return false;
+-  }
+-
+-  MouseEvent e(this, button, x, y, scroll_x, scroll_y);
+-  switch (event->type) {
+-    case GDK_MOTION_NOTIFY:
+-      OnMouseMove(e, destruction_receiver);
+-      break;
+-    case GDK_BUTTON_PRESS:
+-      OnMouseDown(e, destruction_receiver);
+-      break;
+-    case GDK_BUTTON_RELEASE:
+-      OnMouseUp(e, destruction_receiver);
+-      break;
+-    case GDK_SCROLL:
+-      OnMouseWheel(e, destruction_receiver);
+-      break;
+-    default:
+-      break;
+-  }
+-  // Returning immediately anyway - no need to check
+-  // destruction_receiver.IsWindowDestroyed().
+-  return e.is_handled();
+-}
+-
+-bool GTKWindow::HandleKeyboard(GdkEventKey* event,
+-                               WindowDestructionReceiver& destruction_receiver) {
+-  unsigned int modifiers = event->state;
+-  bool shift_pressed = modifiers & GDK_SHIFT_MASK;
+-  bool ctrl_pressed = modifiers & GDK_CONTROL_MASK;
+-  bool alt_pressed = modifiers & (GDK_MOD1_MASK | GDK_META_MASK);
+-  bool super_pressed = modifiers & GDK_SUPER_MASK;
+-  uint32_t key_char = gdk_keyval_to_unicode(event->keyval);
+-  KeyEvent e(this, TranslateGdkKeyvalToVirtualKey(event->keyval), 1, event->type == GDK_KEY_RELEASE,
+-             shift_pressed, ctrl_pressed, alt_pressed, super_pressed);
+-  switch (event->type) {
+-    case GDK_KEY_PRESS:
+-      OnKeyDown(e, destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        return e.is_handled();
+-      }
+-      if (key_char > 0) {
+-        KeyEvent char_event(this, VirtualKey(key_char), 1, false, shift_pressed, ctrl_pressed,
+-                            alt_pressed, super_pressed);
+-        OnKeyChar(char_event, destruction_receiver);
+-        if (char_event.is_handled()) {
+-          e.set_handled(true);
+-        }
+-      }
+-      break;
+-    case GDK_KEY_RELEASE:
+-      OnKeyUp(e, destruction_receiver);
+-      break;
+-    default:
+-      break;
+-  }
+-  // Returning immediately anyway - no need to check
+-  // destruction_receiver.IsWindowDestroyed().
+-  return e.is_handled();
+-}
+-
+-gboolean GTKWindow::WindowEventHandler(GdkEvent* event) {
+-  switch (event->type) {
+-    case GDK_DELETE:
+-    // In case the widget was somehow forcibly destroyed without GDK_DELETE.
+-    case GDK_DESTROY: {
+-      WindowDestructionReceiver destruction_receiver(this);
+-      OnBeforeClose(destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyed()) {
+-        break;
+-      }
+-      // Set window_ to null to ignore events from now on since this
+-      // ui::GTKWindow is entering an indeterminate state - this should be done
+-      // at some point in closing anyway.
+-      GtkWidget* window = window_;
+-      window_ = nullptr;
+-      // Destroying the top-level window also destroys its children.
+-      drawing_area_ = nullptr;
+-      box_ = nullptr;
+-      if (event->type != GDK_DESTROY) {
+-        gtk_widget_destroy(window);
+-      }
+-      OnAfterClose();
+-    } break;
+-
+-    case GDK_FOCUS_CHANGE: {
+-      auto focus_event = reinterpret_cast<const GdkEventFocus*>(event);
+-      WindowDestructionReceiver destruction_receiver(this);
+-      OnFocusUpdate(bool(focus_event->in), destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        break;
+-      }
+-    } break;
+-
+-    case GDK_KEY_PRESS:
+-    case GDK_KEY_RELEASE: {
+-      WindowDestructionReceiver destruction_receiver(this);
+-      HandleKeyboard(reinterpret_cast<GdkEventKey*>(event), destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        break;
+-      }
+-    } break;
+-
+-    default:
+-      break;
+-  }
+-
+-  // The window might have been destroyed by the handlers, don't interact with
+-  // *this in this function from now on.
+-
+-  return GDK_EVENT_PROPAGATE;
+-}
+-
+-gboolean GTKWindow::WindowEventHandlerThunk(GtkWidget* widget, GdkEvent* event,
+-                                            gpointer user_data) {
+-  GTKWindow* window = reinterpret_cast<GTKWindow*>(user_data);
+-  if (!window || widget != window->window_ ||
+-      reinterpret_cast<const GdkEventAny*>(event)->window !=
+-          gtk_widget_get_window(window->window_)) {
+-    return GDK_EVENT_PROPAGATE;
+-  }
+-  return window->WindowEventHandler(event);
+-}
+-
+-gboolean GTKWindow::DrawingAreaEventHandler(GdkEvent* event) {
+-  switch (event->type) {
+-    case GDK_MOTION_NOTIFY:
+-    case GDK_BUTTON_PRESS:
+-    case GDK_BUTTON_RELEASE:
+-    case GDK_SCROLL: {
+-      WindowDestructionReceiver destruction_receiver(this);
+-      HandleMouse(event, destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        break;
+-      }
+-    } break;
+-
+-    case GDK_CONFIGURE: {
+-      if (batched_size_update_depth_) {
+-        batched_size_update_contained_configure_ = true;
+-      } else {
+-        WindowDestructionReceiver destruction_receiver(this);
+-        HandleSizeUpdate(destruction_receiver);
+-        if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-          break;
+-        }
+-      }
+-    } break;
+-    default:
+-      break;
+-  }
+-
+-  // The window might have been destroyed by the handlers, don't interact with
+-  // *this in this function from now on.
+-
+-  return GDK_EVENT_PROPAGATE;
+-}
+-
+-gboolean GTKWindow::DrawingAreaEventHandlerThunk(GtkWidget* widget, GdkEvent* event,
+-                                                 gpointer user_data) {
+-  GTKWindow* window = reinterpret_cast<GTKWindow*>(user_data);
+-  if (!window || widget != window->drawing_area_ ||
+-      reinterpret_cast<const GdkEventAny*>(event)->window !=
+-          gtk_widget_get_window(window->drawing_area_)) {
+-    return GDK_EVENT_PROPAGATE;
+-  }
+-  return window->DrawingAreaEventHandler(event);
+-}
+-
+-gboolean GTKWindow::DrawHandler(GtkWidget* widget, cairo_t* cr, gpointer user_data) {
+-  GTKWindow* window = reinterpret_cast<GTKWindow*>(user_data);
+-  if (!window || widget != window->drawing_area_) {
+-    return FALSE;
+-  }
+-  if (window->batched_size_update_depth_) {
+-    window->batched_size_update_contained_draw_ = true;
+-  } else {
+-    window->OnPaint();
+-  }
+-  return TRUE;
+-}
+-
+-std::unique_ptr<ui::MenuItem> MenuItem::Create(Type type, const std::string& text,
+-                                               const std::string& hotkey,
+-                                               std::function<void()> callback) {
+-  return std::make_unique<GTKMenuItem>(type, text, hotkey, callback);
+-}
+-
+-void GTKMenuItem::ActivateHandler(GtkWidget* menu_item, gpointer user_data) {
+-  static_cast<GTKMenuItem*>(user_data)->OnSelected();
+-  // The menu item might have been destroyed by its OnSelected, don't do
+-  // anything with it here from now on.
+-}
+-
+-GTKMenuItem::GTKMenuItem(Type type, const std::string& text, const std::string& hotkey,
+-                         std::function<void()> callback)
+-    : MenuItem(type, text, hotkey, std::move(callback)) {
+-  std::string label = text;
+-  // TODO(dougvj) Would we ever need to escape underscores?
+-  // Replace & with _ for gtk to see the memonic
+-  std::replace(label.begin(), label.end(), '&', '_');
+-  const gchar* gtk_label = reinterpret_cast<const gchar*>(label.c_str());
+-  switch (type) {
+-    case MenuItem::Type::kNormal:
+-    default:
+-      menu_ = gtk_menu_bar_new();
+-      break;
+-    case MenuItem::Type::kPopup:
+-      menu_ = gtk_menu_item_new_with_mnemonic(gtk_label);
+-      break;
+-    case MenuItem::Type::kSeparator:
+-      menu_ = gtk_separator_menu_item_new();
+-      break;
+-    case MenuItem::Type::kString:
+-      auto full_name = text;
+-      if (!hotkey.empty()) {
+-        full_name += "\t" + hotkey;
+-      }
+-      menu_ = gtk_menu_item_new_with_mnemonic(gtk_label);
+-      break;
+-  }
+-  if (menu_) {
+-    // Own the object because it may be detached from and re-attached to a
+-    // Window.
+-    g_object_ref_sink(menu_);
+-    if (GTK_IS_MENU_ITEM(menu_)) {
+-      g_signal_connect(menu_, "activate", G_CALLBACK(ActivateHandler),
+-                       reinterpret_cast<gpointer>(this));
+-    }
+-  }
+-}
+-
+-GTKMenuItem::~GTKMenuItem() {
+-  if (menu_) {
+-    g_object_unref(menu_);
+-  }
+-}
+-
+-void GTKMenuItem::OnChildAdded(MenuItem* generic_child_item) {
+-  auto child_item = static_cast<GTKMenuItem*>(generic_child_item);
+-  GtkWidget* submenu = nullptr;
+-  switch (child_item->type()) {
+-    case MenuItem::Type::kNormal:
+-      // Nothing special.
+-      break;
+-    case MenuItem::Type::kPopup:
+-      if (GTK_IS_MENU_ITEM(menu_)) {
+-        submenu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(menu_));
+-        // Get sub menu and if it doesn't exist create it
+-        if (submenu == nullptr) {
+-          submenu = gtk_menu_new();
+-          gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_), submenu);
+-        }
+-        gtk_menu_shell_append(GTK_MENU_SHELL(submenu), child_item->handle());
+-      } else {
+-        gtk_menu_shell_append(GTK_MENU_SHELL(menu_), child_item->handle());
+-      }
+-      break;
+-    case MenuItem::Type::kSeparator:
+-    case MenuItem::Type::kString:
+-      assert(GTK_IS_MENU_ITEM(menu_));
+-      // Get sub menu and if it doesn't exist create it
+-      submenu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(menu_));
+-      if (submenu == nullptr) {
+-        submenu = gtk_menu_new();
+-        gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_), submenu);
+-      }
+-      gtk_menu_shell_append(GTK_MENU_SHELL(submenu), child_item->handle());
+-      break;
+-  }
+-}
+-
+-// TODO(dougvj)
+-void GTKMenuItem::OnChildRemoved(MenuItem* generic_child_item) {
+-  assert_always();
+-}
+-
+-}  // namespace ui
+-
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/src/ui/window_sdl.cpp b/thirdparty/rexglue-sdk/src/ui/window_sdl.cpp
+new file mode 100644
+index 00000000..83a89ff2
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/src/ui/window_sdl.cpp
+@@ -0,0 +1,485 @@
++/**
++ * @file        ui/window_sdl.cpp
++ * @brief       SDL3 implementation of the Window abstraction
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ *
++ * @remarks     Derived from Xenia's window_win.cc (Ben Vanik, 2020).
++ */
++
++#include <rex/ui/window_sdl.h>
++
++#include <algorithm>
++#include <cstring>
++#include <filesystem>
++
++#define UTF_CPP_CPLUSPLUS 201703L  // -fno-char8_t
++#include <utf8.h>
++
++#include <rex/cvar.h>
++#include <rex/graphics/flags.h>
++#include <rex/graphics/video_mode_util.h>
++#include <rex/logging.h>
++#include <rex/platform.h>
++#include <rex/ui/flags.h>
++#include <rex/ui/sdl_virtual_key.h>
++
++#if REX_PLATFORM_WIN32
++#include <rex/ui/surface_win.h>
++#else
++#include <X11/Xlib-xcb.h>
++#include <rex/ui/surface_gnulinux.h>
++#endif
++
++namespace rex::ui {
++
++namespace {
++
++uint32_t ResolveWindowWidth(uint32_t requested_width) {
++  if (REXCVAR_GET(window_width) > 0) {
++    return uint32_t(REXCVAR_GET(window_width));
++  }
++  if (!rex::cvar::HasNonDefaultValue("window_width")) {
++    if (rex::cvar::HasNonDefaultValue("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
++      return uint32_t(std::clamp(REXCVAR_GET(video_mode_width), 1, 8192));
++    }
++    int32_t preset_width = 0;
++    int32_t preset_height = 0;
++    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
++                                                                       preset_height)) {
++      return uint32_t(std::clamp(preset_width, 1, 8192));
++    }
++  }
++  return requested_width;
++}
++
++uint32_t ResolveWindowHeight(uint32_t requested_height) {
++  if (REXCVAR_GET(window_height) > 0) {
++    return uint32_t(REXCVAR_GET(window_height));
++  }
++  if (!rex::cvar::HasNonDefaultValue("window_height")) {
++    if (rex::cvar::HasNonDefaultValue("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
++      return uint32_t(std::clamp(REXCVAR_GET(video_mode_height), 1, 8192));
++    }
++    int32_t preset_width = 0;
++    int32_t preset_height = 0;
++    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
++                                                                       preset_height)) {
++      return uint32_t(std::clamp(preset_height, 1, 8192));
++    }
++  }
++  return requested_height;
++}
++
++// SDL timer callback (runs on SDL's timer thread): defer the actual hide to
++// the UI thread. The deferred function only touches the global SDL cursor and
++// the window's nonvirtual cursor-visibility getter; the window owns the timer
++// and removes it before destroying the SDL window.
++Uint32 CursorAutoHideTimerCallback(void* userdata, SDL_TimerID timer_id, Uint32 interval) {
++  (void)timer_id;
++  (void)interval;
++  auto* window = static_cast<WindowSDL*>(userdata);
++  window->app_context().CallInUIThreadDeferred([window] {
++    if (window->GetCursorVisibility() == Window::CursorVisibility::kAutoHidden) {
++      SDL_HideCursor();
++    }
++  });
++  return 0;  // One-shot.
++}
++
++MouseEvent::Button TranslateSDLMouseButton(Uint8 button) {
++  switch (button) {
++    case SDL_BUTTON_LEFT:
++      return MouseEvent::Button::kLeft;
++    case SDL_BUTTON_RIGHT:
++      return MouseEvent::Button::kRight;
++    case SDL_BUTTON_MIDDLE:
++      return MouseEvent::Button::kMiddle;
++    case SDL_BUTTON_X1:
++      return MouseEvent::Button::kX1;
++    case SDL_BUTTON_X2:
++      return MouseEvent::Button::kX2;
++    default:
++      return MouseEvent::Button::kNone;
++  }
++}
++
++}  // namespace
++
++std::unique_ptr<Window> Window::Create(WindowedAppContext& app_context,
++                                       const std::string_view title, uint32_t desired_logical_width,
++                                       uint32_t desired_logical_height) {
++  desired_logical_width = ResolveWindowWidth(desired_logical_width);
++  desired_logical_height = ResolveWindowHeight(desired_logical_height);
++  return std::make_unique<WindowSDL>(app_context, title, desired_logical_width,
++                                     desired_logical_height);
++}
++
++WindowSDL::WindowSDL(WindowedAppContext& app_context, const std::string_view title,
++                     uint32_t desired_logical_width, uint32_t desired_logical_height)
++    : Window(app_context, title, desired_logical_width, desired_logical_height) {}
++
++WindowSDL::~WindowSDL() {
++  EnterDestructor();
++  DestroySDLWindow();
++}
++
++bool WindowSDL::OpenImpl() {
++  // SDL window coordinates are physical pixels on Windows and X11.
++  SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
++  // espgaluda2-recomp (sdk-patches/0006): Vulkan-capable, so an app renderer can make its surface with
++  // SDL_Vulkan_CreateSurface (on Wayland or X11 alike); the SDK's own presenter is unaffected.
++  flags |= SDL_WINDOW_VULKAN;
++  sdl_window_ = SDL_CreateWindow(GetTitle().c_str(), int(SizeToPhysical(GetDesiredLogicalWidth())),
++                                 int(SizeToPhysical(GetDesiredLogicalHeight())), flags);
++  if (!sdl_window_) {
++    REXLOG_ERROR("SDL_CreateWindow failed: {}", SDL_GetError());
++    return false;
++  }
++  sdl_window_id_ = SDL_GetWindowID(sdl_window_);
++  sdl_app_context().RegisterWindow(sdl_window_id_, this);
++
++  if (IsFullscreen()) {
++    // Borderless desktop fullscreen (a NULL display mode is SDL3's default).
++    SDL_SetWindowFullscreen(sdl_window_, true);
++  }
++  // SDL3 requires explicit opt-in for text input events.
++  SDL_StartTextInput(sdl_window_);
++  ApplyCursorVisibilityNow();
++  SDL_ShowWindow(sdl_window_);
++
++  // Actualize state for the common Window code. Listener dispatch is handled
++  // by Window::Open after OpenImpl returns; these only record initial state.
++  int pixel_width = 0;
++  int pixel_height = 0;
++  SDL_GetWindowSizeInPixels(sdl_window_, &pixel_width, &pixel_height);
++  WindowDestructionReceiver destruction_receiver(this);
++  OnActualSizeUpdate(uint32_t(pixel_width), uint32_t(pixel_height), destruction_receiver);
++  if (destruction_receiver.IsWindowDestroyed()) {
++    return true;
++  }
++  if (SDL_GetWindowFlags(sdl_window_) & SDL_WINDOW_INPUT_FOCUS) {
++    OnFocusUpdate(true, destruction_receiver);
++  }
++  return true;
++}
++
++void WindowSDL::RequestCloseImpl() {
++  PerformClose();
++}
++
++void WindowSDL::PerformClose() {
++  WindowDestructionReceiver destruction_receiver(this);
++  OnBeforeClose(destruction_receiver);
++  if (destruction_receiver.IsWindowDestroyed()) {
++    return;
++  }
++  DestroySDLWindow();
++  OnAfterClose();
++}
++
++void WindowSDL::DestroySDLWindow() {
++  if (cursor_hide_timer_) {
++    SDL_RemoveTimer(cursor_hide_timer_);
++    cursor_hide_timer_ = 0;
++  }
++  if (sdl_window_) {
++    sdl_app_context().UnregisterWindow(sdl_window_id_);
++    SDL_DestroyWindow(sdl_window_);
++    sdl_window_ = nullptr;
++    sdl_window_id_ = 0;
++  }
++}
++
++void* WindowSDL::GetNativeWindowHandle() const {
++#if REX_PLATFORM_WIN32
++  if (!sdl_window_) {
++    return nullptr;
++  }
++  return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
++                                SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
++#else
++  return nullptr;
++#endif
++}
++
++uint32_t WindowSDL::GetLatestDpiImpl() const {
++  float scale = sdl_window_ ? SDL_GetWindowDisplayScale(sdl_window_)
++                            : SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
++  if (scale <= 0.0f) {
++    return GetMediumDpi();
++  }
++  return uint32_t(scale * float(GetMediumDpi()) + 0.5f);
++}
++
++void WindowSDL::ApplyNewFullscreen() {
++  if (!sdl_window_) {
++    return;
++  }
++  SDL_SetWindowFullscreen(sdl_window_, IsFullscreen());
++}
++
++void WindowSDL::ApplyNewTitle() {
++  if (!sdl_window_) {
++    return;
++  }
++  SDL_SetWindowTitle(sdl_window_, GetTitle().c_str());
++}
++
++void WindowSDL::ApplyNewMouseCapture() {
++  SDL_CaptureMouse(true);
++}
++
++void WindowSDL::ApplyNewMouseRelease() {
++  SDL_CaptureMouse(false);
++}
++
++void WindowSDL::ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) {
++  (void)old_cursor_visibility;
++  ApplyCursorVisibilityNow();
++}
++
++void WindowSDL::ApplyCursorVisibilityNow() {
++  switch (GetCursorVisibility()) {
++    case CursorVisibility::kVisible:
++      if (cursor_hide_timer_) {
++        SDL_RemoveTimer(cursor_hide_timer_);
++        cursor_hide_timer_ = 0;
++      }
++      SDL_ShowCursor();
++      break;
++    case CursorVisibility::kHidden:
++      if (cursor_hide_timer_) {
++        SDL_RemoveTimer(cursor_hide_timer_);
++        cursor_hide_timer_ = 0;
++      }
++      SDL_HideCursor();
++      break;
++    case CursorVisibility::kAutoHidden:
++      // Hide immediately (see the contract in window.h: switching to
++      // kAutoHidden hides instantly, e.g. when entering fullscreen); the
++      // mouse-motion handler reveals the cursor and re-arms the timer.
++      SDL_HideCursor();
++      break;
++  }
++}
++
++void WindowSDL::RearmCursorAutoHideTimer() {
++  if (cursor_hide_timer_) {
++    SDL_RemoveTimer(cursor_hide_timer_);
++  }
++  cursor_hide_timer_ =
++      SDL_AddTimer(kDefaultCursorAutoHideMilliseconds, CursorAutoHideTimerCallback, this);
++}
++
++void WindowSDL::FocusImpl() {
++  if (!sdl_window_) {
++    return;
++  }
++  SDL_RaiseWindow(sdl_window_);
++}
++
++std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed_types) {
++  if (!sdl_window_) {
++    return nullptr;
++  }
++  SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window_);
++  if (allowed_types & Surface::kTypeFlag_WaylandSurface) {
++    auto* wl_display_ptr = static_cast<struct wl_display*>(
++        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr));
++    auto* wl_surface_ptr = static_cast<struct wl_surface*>(
++        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr));
++    if (wl_display_ptr && wl_surface_ptr) {
++      return std::make_unique<WaylandSurface>(wl_display_ptr, wl_surface_ptr, sdl_window_);
++    }
++  }
++#if REX_PLATFORM_WIN32
++  if (allowed_types & Surface::kTypeFlag_Win32Hwnd) {
++    HWND hwnd = static_cast<HWND>(
++        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
++    HINSTANCE hinstance = static_cast<HINSTANCE>(
++        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, nullptr));
++    if (hwnd) {
++      return std::make_unique<Win32HwndSurface>(hinstance, hwnd);
++    }
++  }
++#else
++  if (allowed_types & Surface::kTypeFlag_XcbWindow) {
++    auto* display = static_cast<Display*>(
++        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr));
++    auto x11_window = static_cast<xcb_window_t>(
++        SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
++    if (display && x11_window) {
++      return std::make_unique<XcbWindowSurface>(XGetXCBConnection(display), x11_window);
++    }
++  }
++#endif
++  return nullptr;
++}
++
++void WindowSDL::RequestPaintImpl() {
++  // Coalesce: at most one queued paint event at a time. Callable from non-UI
++  // threads; SDL_PushEvent is thread-safe.
++  if (paint_pending_.exchange(true, std::memory_order_acq_rel)) {
++    return;
++  }
++  SDL_Event event{};
++  event.type = sdl_app_context().paint_event_type();
++  event.user.windowID = sdl_window_id_;
++  SDL_PushEvent(&event);
++}
++
++void WindowSDL::HandlePaintEvent() {
++  paint_pending_.store(false, std::memory_order_release);
++  OnPaint();
++}
++
++void WindowSDL::HandleWindowEvent(SDL_Event& event) {
++  WindowDestructionReceiver destruction_receiver(this);
++  switch (event.type) {
++    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
++      OnActualSizeUpdate(uint32_t(event.window.data1), uint32_t(event.window.data2),
++                         destruction_receiver);
++      break;
++    case SDL_EVENT_WINDOW_RESIZED: {
++      // Track the user-driven size as the desired size for the normal state
++      // only (mirrors the Win32 WM_SIZE handling).
++      SDL_WindowFlags flags = SDL_GetWindowFlags(sdl_window_);
++      if (!(flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MINIMIZED))) {
++        OnDesiredLogicalSizeUpdate(SizeToLogical(uint32_t(event.window.data1)),
++                                   SizeToLogical(uint32_t(event.window.data2)));
++      }
++      break;
++    }
++    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
++      UISetupEvent e(this);
++      OnDpiChanged(e, destruction_receiver);
++      break;
++    }
++    case SDL_EVENT_WINDOW_DISPLAY_CHANGED: {
++      MonitorUpdateEvent e(this, true);
++      OnMonitorUpdate(e);
++      break;
++    }
++    case SDL_EVENT_WINDOW_FOCUS_GAINED:
++      OnFocusUpdate(true, destruction_receiver);
++      break;
++    case SDL_EVENT_WINDOW_FOCUS_LOST:
++      OnFocusUpdate(false, destruction_receiver);
++      break;
++    case SDL_EVENT_WINDOW_EXPOSED:
++      // The platform cannot retain the previous image; force the paint.
++      OnPaint(true);
++      break;
++    case SDL_EVENT_WINDOW_MINIMIZED:
++      OnMinimized(destruction_receiver);
++      break;
++    case SDL_EVENT_WINDOW_RESTORED:
++      OnRestored(destruction_receiver);
++      break;
++    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
++      // SDL destroys nothing on its own; this is the veto point.
++      if (SendCloseRequestToListeners(destruction_receiver)) {
++        if (!destruction_receiver.IsWindowDestroyed()) {
++          PerformClose();
++        }
++      }
++      break;
++    default:
++      break;
++  }
++}
++
++void WindowSDL::HandleDropEvent(SDL_Event& event) {
++  WindowDestructionReceiver destruction_receiver(this);
++  FileDropEvent e(this, std::filesystem::path(event.drop.data));
++  OnFileDrop(e, destruction_receiver);
++}
++
++void WindowSDL::HandleKeyEvent(SDL_Event& event) {
++  VirtualKey virtual_key = TranslateSDLScancode(event.key.scancode);
++  if (virtual_key == VirtualKey::kNone) {
++    return;
++  }
++  SDL_Keymod mod = event.key.mod;
++  KeyEvent e(this, virtual_key, /*repeat_count=*/1,
++             /*prev_state=*/event.key.repeat,
++             /*modifier_shift_pressed=*/(mod & SDL_KMOD_SHIFT) != 0,
++             /*modifier_ctrl_pressed=*/(mod & SDL_KMOD_CTRL) != 0,
++             /*modifier_alt_pressed=*/(mod & SDL_KMOD_ALT) != 0,
++             /*modifier_super_pressed=*/(mod & SDL_KMOD_GUI) != 0);
++  WindowDestructionReceiver destruction_receiver(this);
++  if (event.type == SDL_EVENT_KEY_DOWN) {
++    OnKeyDown(e, destruction_receiver);
++  } else {
++    OnKeyUp(e, destruction_receiver);
++  }
++}
++
++void WindowSDL::HandleTextInputEvent(SDL_Event& event) {
++  // Replicate the Win32 WM_CHAR behavior: one OnKeyChar per codepoint with
++  // the character code in the virtual key slot.
++  const char* text = event.text.text;
++  if (!text || !*text) {
++    return;
++  }
++  WindowDestructionReceiver destruction_receiver(this);
++  const char* it = text;
++  const char* end = text + std::strlen(text);
++  while (it < end) {
++    uint32_t codepoint = utf8::unchecked::next(it);
++    KeyEvent e(this, VirtualKey(codepoint), 1, false, false, false, false, false);
++    OnKeyChar(e, destruction_receiver);
++    if (destruction_receiver.IsWindowDestroyed()) {
++      return;
++    }
++  }
++}
++
++void WindowSDL::HandleMouseEvent(SDL_Event& event) {
++  // SDL3 reports float window coordinates; listeners expect physical pixels.
++  float density = sdl_window_ ? SDL_GetWindowPixelDensity(sdl_window_) : 1.0f;
++  if (density <= 0.0f) {
++    density = 1.0f;
++  }
++  WindowDestructionReceiver destruction_receiver(this);
++  switch (event.type) {
++    case SDL_EVENT_MOUSE_MOTION: {
++      if (GetCursorVisibility() == CursorVisibility::kAutoHidden) {
++        SDL_ShowCursor();
++        RearmCursorAutoHideTimer();
++      }
++      MouseEvent e(this, MouseEvent::Button::kNone, int32_t(event.motion.x * density),
++                   int32_t(event.motion.y * density));
++      OnMouseMove(e, destruction_receiver);
++      break;
++    }
++    case SDL_EVENT_MOUSE_BUTTON_DOWN:
++    case SDL_EVENT_MOUSE_BUTTON_UP: {
++      MouseEvent e(this, TranslateSDLMouseButton(event.button.button),
++                   int32_t(event.button.x * density), int32_t(event.button.y * density));
++      if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
++        OnMouseDown(e, destruction_receiver);
++      } else {
++        OnMouseUp(e, destruction_receiver);
++      }
++      break;
++    }
++    case SDL_EVENT_MOUSE_WHEEL: {
++      MouseEvent e(this, MouseEvent::Button::kNone, int32_t(event.wheel.mouse_x * density),
++                   int32_t(event.wheel.mouse_y * density),
++                   int32_t(event.wheel.x * float(MouseEvent::kScrollPerDetent)),
++                   int32_t(event.wheel.y * float(MouseEvent::kScrollPerDetent)));
++      OnMouseWheel(e, destruction_receiver);
++      break;
++    }
++    default:
++      break;
++  }
++}
++
++}  // namespace rex::ui
+diff --git a/thirdparty/rexglue-sdk/src/ui/window_win.cpp b/thirdparty/rexglue-sdk/src/ui/window_win.cpp
+deleted file mode 100644
+index 09c44a3a..00000000
+--- a/thirdparty/rexglue-sdk/src/ui/window_win.cpp
++++ /dev/null
+@@ -1,1395 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2022 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <algorithm>
+-#include <memory>
+-#include <string>
+-#include <vector>
+-
+-#include <rex/assert.h>
+-#include <rex/cvar.h>
+-#include <rex/filesystem.h>
+-#include <rex/graphics/flags.h>
+-#include <rex/graphics/video_mode_util.h>
+-#include <rex/logging.h>
+-#include <rex/ui/flags.h>
+-#include <rex/ui/surface_win.h>
+-#include <rex/ui/window_win.h>
+-
+-// Must be included before Windows headers for things like NOMINMAX.
+-#include <windowsx.h>
+-
+-#include <rex/platform.h>
+-#include <rex/ui/virtual_key.h>
+-#include <rex/ui/windowed_app_context_win.h>
+-
+-#include <ShellScalingApi.h>
+-#include <dwmapi.h>
+-#include <shellapi.h>
+-#include <tpcshrd.h>
+-
+-namespace {
+-
+-uint32_t ResolveWindowWidth(uint32_t requested_width) {
+-  if (REXCVAR_GET(window_width) > 0) {
+-    return uint32_t(REXCVAR_GET(window_width));
+-  }
+-  if (!rex::cvar::HasNonDefaultValue("window_width")) {
+-    if (rex::cvar::HasNonDefaultValue("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
+-      return uint32_t(std::clamp(REXCVAR_GET(video_mode_width), 1, 8192));
+-    }
+-    int32_t preset_width = 0;
+-    int32_t preset_height = 0;
+-    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+-                                                                       preset_height)) {
+-      return uint32_t(std::clamp(preset_width, 1, 8192));
+-    }
+-  }
+-  return requested_width;
+-}
+-
+-uint32_t ResolveWindowHeight(uint32_t requested_height) {
+-  if (REXCVAR_GET(window_height) > 0) {
+-    return uint32_t(REXCVAR_GET(window_height));
+-  }
+-  if (!rex::cvar::HasNonDefaultValue("window_height")) {
+-    if (rex::cvar::HasNonDefaultValue("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
+-      return uint32_t(std::clamp(REXCVAR_GET(video_mode_height), 1, 8192));
+-    }
+-    int32_t preset_width = 0;
+-    int32_t preset_height = 0;
+-    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+-                                                                       preset_height)) {
+-      return uint32_t(std::clamp(preset_height, 1, 8192));
+-    }
+-  }
+-  return requested_height;
+-}
+-
+-BOOL CALLBACK EnumMonitorsCallback(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
+-  auto* monitors = reinterpret_cast<std::vector<HMONITOR>*>(data);
+-  monitors->push_back(monitor);
+-  return TRUE;
+-}
+-
+-HMONITOR GetMonitorByIndex(int32_t index) {
+-  if (index <= 0) {
+-    return nullptr;
+-  }
+-  std::vector<HMONITOR> monitors;
+-  EnumDisplayMonitors(nullptr, nullptr, EnumMonitorsCallback, reinterpret_cast<LPARAM>(&monitors));
+-  if (index <= static_cast<int32_t>(monitors.size())) {
+-    return monitors[index - 1];
+-  }
+-  return nullptr;
+-}
+-
+-}  // namespace
+-
+-namespace rex {
+-namespace ui {
+-
+-std::unique_ptr<Window> Window::Create(WindowedAppContext& app_context,
+-                                       const std::string_view title, uint32_t desired_logical_width,
+-                                       uint32_t desired_logical_height) {
+-  desired_logical_width = ResolveWindowWidth(desired_logical_width);
+-  desired_logical_height = ResolveWindowHeight(desired_logical_height);
+-  return std::make_unique<Win32Window>(app_context, title, desired_logical_width,
+-                                       desired_logical_height);
+-}
+-
+-Win32Window::Win32Window(WindowedAppContext& app_context, const std::string_view title,
+-                         uint32_t desired_logical_width, uint32_t desired_logical_height)
+-    : Window(app_context, title, desired_logical_width, desired_logical_height),
+-      arrow_cursor_(LoadCursor(nullptr, IDC_ARROW)) {
+-  dpi_ = GetCurrentSystemDpi();
+-}
+-
+-Win32Window::~Win32Window() {
+-  EnterDestructor();
+-  if (cursor_auto_hide_timer_) {
+-    DeleteTimerQueueTimer(nullptr, cursor_auto_hide_timer_, nullptr);
+-    cursor_auto_hide_timer_ = nullptr;
+-  }
+-  if (hwnd_) {
+-    // Set hwnd_ to null to ignore events from now on since this Win32Window is
+-    // entering an indeterminate state.
+-    HWND hwnd = hwnd_;
+-    hwnd_ = nullptr;
+-    SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
+-    DestroyWindow(hwnd);
+-  }
+-  if (icon_) {
+-    DestroyIcon(icon_);
+-  }
+-}
+-
+-uint32_t Win32Window::GetMediumDpi() const {
+-  return USER_DEFAULT_SCREEN_DPI;
+-}
+-
+-bool Win32Window::OpenImpl() {
+-  const Win32WindowedAppContext& win32_app_context =
+-      static_cast<const Win32WindowedAppContext&>(app_context());
+-  HINSTANCE hinstance = win32_app_context.hinstance();
+-
+-  static bool has_registered_class = false;
+-  if (!has_registered_class) {
+-    WNDCLASSEXW wcex;
+-    wcex.cbSize = sizeof(wcex);
+-    wcex.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+-    wcex.lpfnWndProc = Win32Window::WndProcThunk;
+-    wcex.cbClsExtra = 0;
+-    wcex.cbWndExtra = 0;
+-    wcex.hInstance = hinstance;
+-    wcex.hIcon = LoadIconW(hinstance, L"MAINICON");
+-    wcex.hIconSm = nullptr;  // LoadIconW(hinstance, L"MAINICON");
+-    wcex.hCursor = arrow_cursor_;
+-    // Matches the black background color of the presenter's painting.
+-    wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+-    wcex.lpszMenuName = nullptr;
+-    wcex.lpszClassName = L"RexWindowClass";
+-    if (!RegisterClassExW(&wcex)) {
+-      REXLOG_ERROR("RegisterClassEx failed");
+-      return false;
+-    }
+-    has_registered_class = true;
+-  }
+-
+-  const Win32MenuItem* main_menu = static_cast<const Win32MenuItem*>(GetMainMenu());
+-
+-  // Setup the initial size for the non-fullscreen window. With per-monitor DPI,
+-  // this is also done to be able to obtain the initial window rectangle (with
+-  // CW_USEDEFAULT) to get the monitor for the window position, and then to
+-  // adjust the normal window size to the new DPI.
+-  // Save the initial desired size since it may be modified by the handler of
+-  // the WM_SIZE sent during window creation - it's needed for the initial
+-  // per-monitor DPI scaling.
+-  uint32_t initial_desired_logical_width = GetDesiredLogicalWidth();
+-  uint32_t initial_desired_logical_height = GetDesiredLogicalHeight();
+-  const Win32WindowedAppContext::PerMonitorDpiV2Api* per_monitor_dpi_v2_api =
+-      win32_app_context.per_monitor_dpi_v2_api();
+-  const Win32WindowedAppContext::PerMonitorDpiV1Api* per_monitor_dpi_v1_api =
+-      win32_app_context.per_monitor_dpi_v1_api();
+-  // Even with per-monitor DPI, take the closest approximation (system DPI) to
+-  // potentially more accurately determine the initial monitor.
+-  dpi_ = GetCurrentSystemDpi();
+-  DWORD window_style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+-  DWORD window_ex_style = WS_EX_APPWINDOW | WS_EX_CONTROLPARENT;
+-  RECT window_size_rect;
+-  window_size_rect.left = 0;
+-  window_size_rect.top = 0;
+-  window_size_rect.right =
+-      LONG(ConvertSizeDpi(initial_desired_logical_width, dpi_, USER_DEFAULT_SCREEN_DPI));
+-  window_size_rect.bottom =
+-      LONG(ConvertSizeDpi(initial_desired_logical_height, dpi_, USER_DEFAULT_SCREEN_DPI));
+-  AdjustWindowRectangle(window_size_rect, window_style, BOOL(main_menu != nullptr), window_ex_style,
+-                        dpi_);
+-  // Create the window. Though WM_NCCREATE will assign to `hwnd_` too, still do
+-  // the assignment here to handle the case of a failure after WM_NCCREATE, for
+-  // instance.
+-  auto wide_title = rex::string::to_utf16(GetTitle());
+-  hwnd_ = CreateWindowExW(
+-      window_ex_style, L"RexWindowClass", reinterpret_cast<LPCWSTR>(wide_title.c_str()),
+-      window_style, CW_USEDEFAULT, CW_USEDEFAULT, window_size_rect.right - window_size_rect.left,
+-      window_size_rect.bottom - window_size_rect.top, nullptr, nullptr, hinstance, this);
+-  if (!hwnd_) {
+-    REXLOG_ERROR("CreateWindowExW failed");
+-    return false;
+-  }
+-  // For per-monitor DPI, obtain the DPI of the monitor the window was created
+-  // on, and adjust the initial normal size for it. If as a result of this
+-  // resizing, the window is moved to a different monitor, the WM_DPICHANGED
+-  // handler will do the needed correction.
+-  uint32_t initial_monitor_dpi = dpi_;
+-  if (per_monitor_dpi_v2_api) {
+-    initial_monitor_dpi = per_monitor_dpi_v2_api->get_dpi_for_window(hwnd_);
+-  } else if (per_monitor_dpi_v1_api) {
+-    HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+-    UINT monitor_dpi_x, monitor_dpi_y;
+-    if (monitor && SUCCEEDED(per_monitor_dpi_v1_api->get_dpi_for_monitor(
+-                       monitor, MDT_DEFAULT, &monitor_dpi_x, &monitor_dpi_y))) {
+-      initial_monitor_dpi = monitor_dpi_x;
+-    }
+-  }
+-  if (dpi_ != initial_monitor_dpi) {
+-    dpi_ = initial_monitor_dpi;
+-    WINDOWPLACEMENT initial_dpi_placement;
+-    // Note that WINDOWPLACEMENT contains workspace coordinates, which are
+-    // adjusted to exclude toolbars such as the taskbar - the positions and
+-    // rectangle origins there can't be mixed with origins of rectangles in
+-    // virtual screen coordinates such as those involved in functions like
+-    // GetWindowRect.
+-    initial_dpi_placement.length = sizeof(initial_dpi_placement);
+-    if (GetWindowPlacement(hwnd_, &initial_dpi_placement)) {
+-      window_size_rect.left = 0;
+-      window_size_rect.top = 0;
+-      window_size_rect.right =
+-          LONG(ConvertSizeDpi(initial_desired_logical_width, dpi_, USER_DEFAULT_SCREEN_DPI));
+-      window_size_rect.bottom =
+-          LONG(ConvertSizeDpi(initial_desired_logical_height, dpi_, USER_DEFAULT_SCREEN_DPI));
+-      AdjustWindowRectangle(window_size_rect, window_style, BOOL(main_menu != nullptr),
+-                            window_ex_style, dpi_);
+-      initial_dpi_placement.rcNormalPosition.right =
+-          initial_dpi_placement.rcNormalPosition.left +
+-          (window_size_rect.right - window_size_rect.left);
+-      initial_dpi_placement.rcNormalPosition.bottom =
+-          initial_dpi_placement.rcNormalPosition.top +
+-          (window_size_rect.bottom - window_size_rect.top);
+-      SetWindowPlacement(hwnd_, &initial_dpi_placement);
+-    }
+-  }
+-
+-  // Disable rounded corners starting with Windows 11 (or silently receive and
+-  // ignore E_INVALIDARG on Windows versions before 10.0.22000.0), primarily to
+-  // preserve all pixels of the guest output.
+-  DWM_WINDOW_CORNER_PREFERENCE window_corner_preference = DWMWCP_DONOTROUND;
+-  DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &window_corner_preference,
+-                        sizeof(window_corner_preference));
+-
+-  // Disable flicks.
+-  ATOM atom = GlobalAddAtomW(L"MicrosoftTabletPenServiceProperty");
+-  const DWORD_PTR dwHwndTabletProperty =
+-      TABLET_DISABLE_PRESSANDHOLD |       // disables press and hold (right-click)
+-                                          // gesture
+-      TABLET_DISABLE_PENTAPFEEDBACK |     // disables UI feedback on pen up (waves)
+-      TABLET_DISABLE_PENBARRELFEEDBACK |  // disables UI feedback on pen button
+-                                          // down (circle)
+-      TABLET_DISABLE_FLICKS |             // disables pen flicks (back, forward, drag down,
+-                                          // drag up)
+-      TABLET_DISABLE_TOUCHSWITCH | TABLET_DISABLE_SMOOTHSCROLLING | TABLET_DISABLE_TOUCHUIFORCEON |
+-      TABLET_ENABLE_MULTITOUCHDATA;
+-  SetPropW(hwnd_, L"MicrosoftTabletPenServiceProperty",
+-           reinterpret_cast<HANDLE>(dwHwndTabletProperty));
+-  GlobalDeleteAtom(atom);
+-
+-  // Enable file dragging from external sources
+-  DragAcceptFiles(hwnd_, true);
+-
+-  // Apply the initial state from the Window that the window shouldn't be
+-  // visibly transitioned to.
+-
+-  if (icon_) {
+-    SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon_));
+-    SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon_));
+-  }
+-
+-  // Move the window to the requested monitor before entering fullscreen so
+-  // that MonitorFromWindow picks the correct display.
+-  if (int32_t monitor_index = REXCVAR_GET(monitor); monitor_index > 0) {
+-    HMONITOR target = GetMonitorByIndex(monitor_index);
+-    if (target) {
+-      MONITORINFO mi;
+-      mi.cbSize = sizeof(mi);
+-      if (GetMonitorInfo(target, &mi)) {
+-        RECT wr;
+-        GetWindowRect(hwnd_, &wr);
+-        int w = wr.right - wr.left;
+-        int h = wr.bottom - wr.top;
+-        int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - w) / 2;
+-        int y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - h) / 2;
+-        SetWindowPos(hwnd_, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+-      }
+-    }
+-  }
+-
+-  if (IsFullscreen()) {
+-    // Go fullscreen after setting up everything related to the placement of the
+-    // non-fullscreen window.
+-    WindowDestructionReceiver destruction_receiver(this);
+-    ApplyFullscreenEntry(destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyed()) {
+-      return true;
+-    }
+-  } else {
+-    if (main_menu) {
+-      SetMenu(hwnd_, main_menu->handle());
+-    }
+-  }
+-
+-  // Finally show the window.
+-  ShowWindow(hwnd_, SW_SHOWNORMAL);
+-
+-  // Report the initial actual state after opening, messages for which might
+-  // have missed if they were processed during CreateWindowExW when the HWND was
+-  // not yet attached to the Win32Window.
+-  {
+-    WindowDestructionReceiver destruction_receiver(this);
+-
+-    // Report the desired logical size of the client area in the non-maximized
+-    // state after the initial layout setup in Windows.
+-    WINDOWPLACEMENT shown_placement;
+-    shown_placement.length = sizeof(shown_placement);
+-    if (GetWindowPlacement(hwnd_, &shown_placement)) {
+-      // Get the size of the non-client area to subtract it from the size of the
+-      // entire window in its non-maximized state, to get the client area. For
+-      // safety, in case the window is somehow smaller than its non-client area
+-      // (AdjustWindowRect is not exact in various cases also, such as when the
+-      // menu becomes multiline), clamp to 0.
+-      RECT non_client_area_rect = {};
+-      AdjustWindowRectangle(non_client_area_rect);
+-      OnDesiredLogicalSizeUpdate(
+-          SizeToLogical(uint32_t(std::max(
+-              (shown_placement.rcNormalPosition.right - shown_placement.rcNormalPosition.left) -
+-                  (non_client_area_rect.right - non_client_area_rect.left),
+-              LONG(0)))),
+-          SizeToLogical(uint32_t(std::max(
+-              (shown_placement.rcNormalPosition.bottom - shown_placement.rcNormalPosition.top) -
+-                  (non_client_area_rect.bottom - non_client_area_rect.top),
+-              LONG(0)))));
+-    }
+-
+-    // Report the actual physical size in the current state.
+-    // GetClientRect returns a rectangle with 0 origin.
+-    RECT shown_client_rect;
+-    if (GetClientRect(hwnd_, &shown_client_rect)) {
+-      OnActualSizeUpdate(uint32_t(shown_client_rect.right), uint32_t(shown_client_rect.bottom),
+-                         destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        return true;
+-      }
+-    }
+-
+-    OnFocusUpdate(GetFocus() == hwnd_, destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      return true;
+-    }
+-  }
+-
+-  // Apply the initial state from the Window that involves interaction with the
+-  // user.
+-
+-  if (IsMouseCaptureRequested()) {
+-    SetCapture(hwnd_);
+-  }
+-
+-  cursor_currently_auto_hidden_ = false;
+-  CursorVisibility cursor_visibility = GetCursorVisibility();
+-  if (cursor_visibility != CursorVisibility::kVisible) {
+-    if (cursor_visibility == CursorVisibility::kAutoHidden) {
+-      if (!GetCursorPos(&cursor_auto_hide_last_screen_pos_)) {
+-        cursor_auto_hide_last_screen_pos_.x = LONG_MAX;
+-        cursor_auto_hide_last_screen_pos_.y = LONG_MAX;
+-      }
+-      cursor_currently_auto_hidden_ = true;
+-    }
+-    // OnFocusUpdate needs to be done before this.
+-    SetCursorIfFocusedOnClientArea(nullptr);
+-  }
+-
+-  return true;
+-}
+-
+-void Win32Window::RequestCloseImpl() {
+-  // Note that CloseWindow doesn't close the window, rather, it only minimizes
+-  // it - need to send WM_CLOSE to let the Win32Window WndProc perform all the
+-  // shutdown.
+-  SendMessageW(hwnd_, WM_CLOSE, 0, 0);
+-  // The window might have been deleted by the close handler, don't do anything
+-  // with *this anymore (if that's needed, use a WindowDestructionReceiver).
+-}
+-
+-uint32_t Win32Window::GetLatestDpiImpl() const {
+-  // hwnd_ may be null in this function, but the latest DPI is stored in a
+-  // variable anyway.
+-  return dpi_;
+-}
+-
+-void Win32Window::ApplyNewFullscreen() {
+-  // Various functions here may send messages that may result in the
+-  // listeners being invoked, and potentially cause the destruction of the
+-  // window or fullscreen being toggled from inside this function.
+-  WindowDestructionReceiver destruction_receiver(this);
+-  if (IsFullscreen()) {
+-    ApplyFullscreenEntry(destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      return;
+-    }
+-  } else {
+-    // Changing the style and the menu may change the size too, don't handle
+-    // the resize multiple times (also potentially with the listeners changing
+-    // the desired fullscreen if called from the handling of some message like
+-    // WM_SIZE).
+-    BeginBatchedSizeUpdate();
+-
+-    // Reinstate the non-client area.
+-    SetWindowLong(hwnd_, GWL_STYLE, GetWindowLong(hwnd_, GWL_STYLE) | WS_OVERLAPPEDWINDOW);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-    const Win32MenuItem* main_menu = static_cast<const Win32MenuItem*>(GetMainMenu());
+-    if (main_menu) {
+-      SetMenu(hwnd_, main_menu->handle());
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        if (!destruction_receiver.IsWindowDestroyed()) {
+-          EndBatchedSizeUpdate(destruction_receiver);
+-        }
+-        return;
+-      }
+-    }
+-
+-    // For some reason, WM_DPICHANGED is not sent when the window is borderless
+-    // fullscreen with per-monitor DPI awareness v1 (on Windows versions since
+-    // Windows 8.1 before Windows 10 1703) - refresh the current DPI explicitly.
+-    dpi_ = GetCurrentDpi();
+-    if (dpi_ != pre_fullscreen_dpi_) {
+-      // Rescale the pre-fullscreen non-maximized window size to the new DPI as
+-      // WM_DPICHANGED with the new rectangle was received for the fullscreen
+-      // window size, not the windowed one. Simulating the behavior of the
+-      // automatic resizing when changing the scale in the Windows settings (as
+-      // of Windows 11 21H2 at least), which keeps the physical top-left origin
+-      // of the entire window including the non-client area, but rescales the
+-      // size.
+-      // Note that WINDOWPLACEMENT contains workspace coordinates, which are
+-      // adjusted to exclude toolbars such as the taskbar - the positions and
+-      // rectangle origins there can't be mixed with origins of rectangles in
+-      // virtual screen coordinates such as those involved in functions like
+-      // GetWindowRect.
+-      RECT new_dpi_rect;
+-      new_dpi_rect.left = 0;
+-      new_dpi_rect.top = 0;
+-      new_dpi_rect.right =
+-          LONG(ConvertSizeDpi(pre_fullscreen_normal_client_width_, dpi_, pre_fullscreen_dpi_));
+-      new_dpi_rect.bottom =
+-          LONG(ConvertSizeDpi(pre_fullscreen_normal_client_height_, dpi_, pre_fullscreen_dpi_));
+-      AdjustWindowRectangle(new_dpi_rect);
+-      pre_fullscreen_placement_.rcNormalPosition.right =
+-          pre_fullscreen_placement_.rcNormalPosition.left +
+-          (new_dpi_rect.right - new_dpi_rect.left);
+-      pre_fullscreen_placement_.rcNormalPosition.bottom =
+-          pre_fullscreen_placement_.rcNormalPosition.top + (new_dpi_rect.bottom - new_dpi_rect.top);
+-    }
+-    SetWindowPlacement(hwnd_, &pre_fullscreen_placement_);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-
+-    // https://devblogs.microsoft.com/oldnewthing/20131017-00/?p=2903
+-    SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-
+-    EndBatchedSizeUpdate(destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      return;
+-    }
+-  }
+-}
+-
+-void Win32Window::ApplyNewTitle() {
+-  auto wide_title = rex::string::to_utf16(GetTitle());
+-  SetWindowTextW(hwnd_, reinterpret_cast<LPCWSTR>(wide_title.c_str()));
+-}
+-
+-void Win32Window::LoadAndApplyIcon(const void* buffer, size_t size,
+-                                   bool can_apply_state_in_current_phase) {
+-  bool reset = !buffer || !size;
+-
+-  HICON new_icon, new_icon_small;
+-  if (reset) {
+-    if (!icon_) {
+-      // The icon is already the default one.
+-      return;
+-    }
+-    if (!hwnd_) {
+-      // Don't need to get the actual icon from the class if there's nothing to
+-      // set it for yet (and there's no HWND to get it from, and the class may
+-      // have not been registered yet also).
+-      DestroyIcon(icon_);
+-      icon_ = nullptr;
+-      return;
+-    }
+-    new_icon = reinterpret_cast<HICON>(GetClassLongPtrW(hwnd_, GCLP_HICON));
+-    new_icon_small = reinterpret_cast<HICON>(GetClassLongPtrW(hwnd_, GCLP_HICONSM));
+-    // Not caring if it's null in the class, accepting anything the class
+-    // specifies.
+-  } else {
+-    new_icon = CreateIconFromResourceEx(static_cast<PBYTE>(const_cast<void*>(buffer)), DWORD(size),
+-                                        TRUE, 0x00030000, 0, 0, LR_DEFAULTCOLOR | LR_DEFAULTSIZE);
+-    if (!new_icon) {
+-      return;
+-    }
+-    new_icon_small = new_icon;
+-  }
+-
+-  if (hwnd_) {
+-    SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(new_icon));
+-    SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(new_icon_small));
+-  }
+-
+-  // The old icon is not in use anymore, safe to destroy it now.
+-  if (icon_) {
+-    DestroyIcon(icon_);
+-    icon_ = nullptr;
+-  }
+-
+-  if (!reset) {
+-    assert_true(new_icon_small == new_icon);
+-    icon_ = new_icon;
+-  }
+-}
+-
+-void Win32Window::ApplyNewMainMenu(MenuItem* old_main_menu) {
+-  if (IsFullscreen()) {
+-    // The menu will be set when exiting fullscreen.
+-    return;
+-  }
+-  const Win32MenuItem* main_menu = static_cast<const Win32MenuItem*>(GetMainMenu());
+-  WindowDestructionReceiver destruction_receiver(this);
+-  SetMenu(hwnd_, main_menu ? main_menu->handle() : nullptr);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void Win32Window::CompleteMainMenuItemsUpdateImpl() {
+-  if (IsFullscreen()) {
+-    return;
+-  }
+-  DrawMenuBar(hwnd_);
+-}
+-
+-void Win32Window::ApplyNewMouseCapture() {
+-  WindowDestructionReceiver destruction_receiver(this);
+-  SetCapture(hwnd_);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void Win32Window::ApplyNewMouseRelease() {
+-  if (GetCapture() != hwnd_) {
+-    return;
+-  }
+-  WindowDestructionReceiver destruction_receiver(this);
+-  ReleaseCapture();
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void Win32Window::ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) {
+-  CursorVisibility new_cursor_visibility = GetCursorVisibility();
+-  cursor_currently_auto_hidden_ = false;
+-  if (new_cursor_visibility == CursorVisibility::kAutoHidden) {
+-    if (!GetCursorPos(&cursor_auto_hide_last_screen_pos_)) {
+-      cursor_auto_hide_last_screen_pos_.x = LONG_MAX;
+-      cursor_auto_hide_last_screen_pos_.y = LONG_MAX;
+-    }
+-    cursor_currently_auto_hidden_ = true;
+-  } else if (old_cursor_visibility == CursorVisibility::kAutoHidden) {
+-    if (cursor_auto_hide_timer_) {
+-      DeleteTimerQueueTimer(nullptr, cursor_auto_hide_timer_, nullptr);
+-      cursor_auto_hide_timer_ = nullptr;
+-    }
+-  }
+-  SetCursorIfFocusedOnClientArea(new_cursor_visibility == CursorVisibility::kVisible ? arrow_cursor_
+-                                                                                     : nullptr);
+-}
+-
+-void Win32Window::FocusImpl() {
+-  SetFocus(hwnd_);
+-}
+-
+-std::unique_ptr<Surface> Win32Window::CreateSurfaceImpl(Surface::TypeFlags allowed_types) {
+-  HINSTANCE hInstance = static_cast<const Win32WindowedAppContext&>(app_context()).hinstance();
+-  if (allowed_types & Surface::kTypeFlag_Win32Hwnd) {
+-    return std::make_unique<Win32HwndSurface>(hInstance, hwnd_);
+-  }
+-  return nullptr;
+-}
+-
+-void Win32Window::RequestPaintImpl() {
+-  InvalidateRect(hwnd_, nullptr, FALSE);
+-}
+-
+-BOOL Win32Window::AdjustWindowRectangle(RECT& rect, DWORD style, BOOL menu, DWORD ex_style,
+-                                        UINT dpi) const {
+-  const Win32WindowedAppContext& win32_app_context =
+-      static_cast<const Win32WindowedAppContext&>(app_context());
+-  const Win32WindowedAppContext::PerMonitorDpiV2Api* per_monitor_dpi_v2_api =
+-      win32_app_context.per_monitor_dpi_v2_api();
+-  if (per_monitor_dpi_v2_api) {
+-    return per_monitor_dpi_v2_api->adjust_window_rect_ex_for_dpi(&rect, style, menu, ex_style, dpi);
+-  }
+-  // Before per-monitor DPI v2, there was no rescaling of the non-client
+-  // area at runtime at all, so throughout the execution of the process it will
+-  // behave the same regardless of the DPI.
+-  return AdjustWindowRectEx(&rect, style, menu, ex_style);
+-}
+-
+-BOOL Win32Window::AdjustWindowRectangle(RECT& rect) const {
+-  if (!hwnd_) {
+-    return FALSE;
+-  }
+-  return AdjustWindowRectangle(rect, GetWindowLong(hwnd_, GWL_STYLE),
+-                               BOOL(GetMainMenu() != nullptr), GetWindowLong(hwnd_, GWL_EXSTYLE),
+-                               dpi_);
+-}
+-
+-uint32_t Win32Window::GetCurrentSystemDpi() const {
+-  const Win32WindowedAppContext& win32_app_context =
+-      static_cast<const Win32WindowedAppContext&>(app_context());
+-  const Win32WindowedAppContext::PerMonitorDpiV2Api* per_monitor_dpi_v2_api =
+-      win32_app_context.per_monitor_dpi_v2_api();
+-  if (per_monitor_dpi_v2_api) {
+-    return per_monitor_dpi_v2_api->get_dpi_for_system();
+-  }
+-
+-  HDC screen_hdc = GetDC(nullptr);
+-  if (!screen_hdc) {
+-    return USER_DEFAULT_SCREEN_DPI;
+-  }
+-  // According to MSDN, x and y are identical.
+-  int logical_pixels_x = GetDeviceCaps(screen_hdc, LOGPIXELSX);
+-  ReleaseDC(nullptr, screen_hdc);
+-  return uint32_t(logical_pixels_x);
+-}
+-
+-uint32_t Win32Window::GetCurrentDpi() const {
+-  if (hwnd_) {
+-    const Win32WindowedAppContext& win32_app_context =
+-        static_cast<const Win32WindowedAppContext&>(app_context());
+-
+-    const Win32WindowedAppContext::PerMonitorDpiV2Api* per_monitor_dpi_v2_api =
+-        win32_app_context.per_monitor_dpi_v2_api();
+-    if (per_monitor_dpi_v2_api) {
+-      return per_monitor_dpi_v2_api->get_dpi_for_window(hwnd_);
+-    }
+-
+-    const Win32WindowedAppContext::PerMonitorDpiV1Api* per_monitor_dpi_v1_api =
+-        win32_app_context.per_monitor_dpi_v1_api();
+-    if (per_monitor_dpi_v1_api) {
+-      HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+-      UINT monitor_dpi_x, monitor_dpi_y;
+-      if (monitor && SUCCEEDED(per_monitor_dpi_v1_api->get_dpi_for_monitor(
+-                         monitor, MDT_DEFAULT, &monitor_dpi_x, &monitor_dpi_y))) {
+-        // According to MSDN, x and y are identical.
+-        return monitor_dpi_x;
+-      }
+-    }
+-  }
+-
+-  return GetCurrentSystemDpi();
+-}
+-
+-void Win32Window::ApplyFullscreenEntry(WindowDestructionReceiver& destruction_receiver) {
+-  if (!IsFullscreen()) {
+-    return;
+-  }
+-
+-  // https://blogs.msdn.com/b/oldnewthing/archive/2010/04/12/9994016.aspx
+-  // No reason to use MONITOR_DEFAULTTOPRIMARY instead of
+-  // MONITOR_DEFAULTTONEAREST, however.
+-  pre_fullscreen_dpi_ = dpi_;
+-  pre_fullscreen_placement_.length = sizeof(pre_fullscreen_placement_);
+-  HMONITOR monitor;
+-  MONITORINFO monitor_info;
+-  monitor_info.cbSize = sizeof(monitor_info);
+-  if (!GetWindowPlacement(hwnd_, &pre_fullscreen_placement_) ||
+-      !(monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST)) ||
+-      !GetMonitorInfo(monitor, &monitor_info)) {
+-    OnDesiredFullscreenUpdate(false);
+-    return;
+-  }
+-  // Preserve values for DPI rescaling of the window in the non-maximized state
+-  // if DPI is changed mid-fullscreen.
+-  // Get the size of the non-client area to subtract it from the size of the
+-  // entire window in its non-maximized state, to get the client area. For
+-  // safety, in case the window is somehow smaller than its non-client area
+-  // (AdjustWindowRect is not exact in various cases also, such as when the menu
+-  // becomes multiline), clamp to 0.
+-  RECT non_client_area_rect = {};
+-  AdjustWindowRectangle(non_client_area_rect);
+-  pre_fullscreen_normal_client_width_ =
+-      uint32_t(std::max((pre_fullscreen_placement_.rcNormalPosition.right -
+-                         pre_fullscreen_placement_.rcNormalPosition.left) -
+-                            (non_client_area_rect.right - non_client_area_rect.left),
+-                        LONG(0)));
+-  pre_fullscreen_normal_client_height_ =
+-      uint32_t(std::max((pre_fullscreen_placement_.rcNormalPosition.bottom -
+-                         pre_fullscreen_placement_.rcNormalPosition.top) -
+-                            (non_client_area_rect.bottom - non_client_area_rect.top),
+-                        LONG(0)));
+-
+-  // Changing the style and the menu may change the size too, don't handle the
+-  // resize multiple times (also potentially with the listeners changing the
+-  // desired fullscreen if called from the handling of some message like
+-  // WM_SIZE).
+-  BeginBatchedSizeUpdate();
+-
+-  // Remove the non-client area.
+-  if (GetMainMenu()) {
+-    SetMenu(hwnd_, nullptr);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      if (!destruction_receiver.IsWindowDestroyed()) {
+-        EndBatchedSizeUpdate(destruction_receiver);
+-      }
+-      return;
+-    }
+-  }
+-  SetWindowLong(hwnd_, GWL_STYLE, GetWindowLong(hwnd_, GWL_STYLE) & ~DWORD(WS_OVERLAPPEDWINDOW));
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    if (!destruction_receiver.IsWindowDestroyed()) {
+-      EndBatchedSizeUpdate(destruction_receiver);
+-    }
+-    return;
+-  }
+-
+-  // Resize the window to fullscreen. It is important that this is done _after_
+-  // disabling the decorations and the menu, to make sure that composition will
+-  // not have to be done for the new size of the window at all, so independent,
+-  // low-latency presentation is possible immediately - if the window was
+-  // involved in composition, it may stay composed persistently until some other
+-  // state change that sometimes helps, sometimes doesn't, even if it becomes
+-  // borderless fullscreen again - this occurs sometimes at least on Windows 11
+-  // 21H2 on Nvidia GeForce GTX 1070 on driver version 472.12.
+-  SetWindowPos(hwnd_, HWND_TOP, monitor_info.rcMonitor.left, monitor_info.rcMonitor.top,
+-               monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
+-               monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
+-               SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    if (!destruction_receiver.IsWindowDestroyed()) {
+-      EndBatchedSizeUpdate(destruction_receiver);
+-    }
+-    return;
+-  }
+-
+-  EndBatchedSizeUpdate(destruction_receiver);
+-  if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-    return;
+-  }
+-}
+-
+-void Win32Window::HandleSizeUpdate(WindowDestructionReceiver& destruction_receiver) {
+-  if (!hwnd_) {
+-    // Batched size update ended when the window has already been closed, for
+-    // instance.
+-    return;
+-  }
+-
+-  {
+-    MonitorUpdateEvent e(this, false);
+-    OnMonitorUpdate(e);
+-  }
+-
+-  // For the desired size in the normal, not maximized and not fullscreen state.
+-  if (!IsFullscreen()) {
+-    WINDOWPLACEMENT window_placement;
+-    window_placement.length = sizeof(window_placement);
+-    if (GetWindowPlacement(hwnd_, &window_placement)) {
+-      // window_placement.rcNormalPosition is the entire window's rectangle, not
+-      // only the client area - convert to client.
+-      // https://devblogs.microsoft.com/oldnewthing/20131017-00/?p=2903
+-      // For safety, in case the window is somehow smaller than its non-client
+-      // area (AdjustWindowRect is not exact in various cases also, such as when
+-      // the menu becomes multiline), clamp to 0.
+-      RECT non_client_area_rect = {};
+-      if (AdjustWindowRectangle(non_client_area_rect)) {
+-        OnDesiredLogicalSizeUpdate(
+-            SizeToLogical(uint32_t(std::max(
+-                (window_placement.rcNormalPosition.right - window_placement.rcNormalPosition.left) -
+-                    (non_client_area_rect.right - non_client_area_rect.left),
+-                LONG(0)))),
+-            SizeToLogical(uint32_t(std::max(
+-                (window_placement.rcNormalPosition.bottom - window_placement.rcNormalPosition.top) -
+-                    (non_client_area_rect.bottom - non_client_area_rect.top),
+-                LONG(0)))));
+-      }
+-    }
+-  }
+-
+-  // For the actual state.
+-  // GetClientRect returns a rectangle with 0 origin.
+-  RECT client_rect;
+-  if (GetClientRect(hwnd_, &client_rect)) {
+-    OnActualSizeUpdate(uint32_t(client_rect.right), uint32_t(client_rect.bottom),
+-                       destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-      return;
+-    }
+-  }
+-}
+-
+-void Win32Window::BeginBatchedSizeUpdate() {
+-  // It's okay if batched_size_update_contained_* are not false when beginning
+-  // a batched update, in case the new batched update was started by a window
+-  // listener called from within EndBatchedSizeUpdate.
+-  ++batched_size_update_depth_;
+-}
+-
+-void Win32Window::EndBatchedSizeUpdate(WindowDestructionReceiver& destruction_receiver) {
+-  assert_not_zero(batched_size_update_depth_);
+-  if (--batched_size_update_depth_) {
+-    return;
+-  }
+-  // Resetting batched_size_update_contained_* in closing, not opening, because
+-  // a listener may start a new batch, and finish it, and there won't be need to
+-  // handle the deferred messages twice.
+-  if (batched_size_update_contained_wm_size_) {
+-    batched_size_update_contained_wm_size_ = false;
+-    HandleSizeUpdate(destruction_receiver);
+-    if (destruction_receiver.IsWindowDestroyed()) {
+-      return;
+-    }
+-  }
+-  if (batched_size_update_contained_wm_paint_) {
+-    batched_size_update_contained_wm_paint_ = false;
+-    RequestPaint();
+-  }
+-}
+-
+-bool Win32Window::HandleMouse(UINT message, WPARAM wParam, LPARAM lParam,
+-                              WindowDestructionReceiver& destruction_receiver) {
+-  // Mouse messages usually contain the position in the client area in lParam,
+-  // but WM_MOUSEWHEEL is an exception, it passes the screen position.
+-  int32_t message_x = GET_X_LPARAM(lParam);
+-  int32_t message_y = GET_Y_LPARAM(lParam);
+-  bool message_pos_is_screen = message == WM_MOUSEWHEEL;
+-
+-  POINT client_pos = {message_x, message_y};
+-  if (message_pos_is_screen) {
+-    ScreenToClient(hwnd_, &client_pos);
+-  }
+-
+-  if (GetCursorVisibility() == CursorVisibility::kAutoHidden) {
+-    POINT screen_pos = {message_x, message_y};
+-    if (message_pos_is_screen || ClientToScreen(hwnd_, &screen_pos)) {
+-      if (screen_pos.x != cursor_auto_hide_last_screen_pos_.x ||
+-          screen_pos.y != cursor_auto_hide_last_screen_pos_.y) {
+-        // WM_MOUSEMOVE messages followed by WM_SETCURSOR may be sent for
+-        // reasons not always involving actual mouse movement performed by the
+-        // user. They're sent when the position of the cursor relative to the
+-        // client area has been changed, as well as other events related to
+-        // window management (including when creating the window), even when not
+-        // interacting with the OS. These should not be revealing the cursor.
+-        // Only revealing it if the mouse has actually been moved.
+-        cursor_currently_auto_hidden_ = false;
+-        SetCursorAutoHideTimer();
+-        // There's no need to SetCursor here, mouse messages relevant to the
+-        // cursor within the window are always followed by WM_SETCURSOR.
+-        cursor_auto_hide_last_screen_pos_ = screen_pos;
+-      }
+-    }
+-  }
+-
+-  MouseEvent::Button button = MouseEvent::Button::kNone;
+-  int32_t scroll_y = 0;
+-  switch (message) {
+-    case WM_LBUTTONDOWN:
+-    case WM_LBUTTONUP:
+-      button = MouseEvent::Button::kLeft;
+-      break;
+-    case WM_RBUTTONDOWN:
+-    case WM_RBUTTONUP:
+-      button = MouseEvent::Button::kRight;
+-      break;
+-    case WM_MBUTTONDOWN:
+-    case WM_MBUTTONUP:
+-      button = MouseEvent::Button::kMiddle;
+-      break;
+-    case WM_XBUTTONDOWN:
+-    case WM_XBUTTONUP:
+-      switch (GET_XBUTTON_WPARAM(wParam)) {
+-        case XBUTTON1:
+-          button = MouseEvent::Button::kX1;
+-          break;
+-        case XBUTTON2:
+-          button = MouseEvent::Button::kX2;
+-          break;
+-        default:
+-          // Still handle the movement.
+-          break;
+-      }
+-      break;
+-    case WM_MOUSEMOVE:
+-      button = MouseEvent::Button::kNone;
+-      break;
+-    case WM_MOUSEWHEEL:
+-      button = MouseEvent::Button::kNone;
+-      static_assert(MouseEvent::kScrollPerDetent == WHEEL_DELTA,
+-                    "Assuming the Windows scroll amount can be passed directly to "
+-                    "MouseEvent");
+-      scroll_y = GET_WHEEL_DELTA_WPARAM(wParam);
+-      break;
+-    default:
+-      return false;
+-  }
+-
+-  MouseEvent e(this, button, client_pos.x, client_pos.y, 0, scroll_y);
+-  switch (message) {
+-    case WM_LBUTTONDOWN:
+-    case WM_RBUTTONDOWN:
+-    case WM_MBUTTONDOWN:
+-    case WM_XBUTTONDOWN:
+-      OnMouseDown(e, destruction_receiver);
+-      break;
+-    case WM_LBUTTONUP:
+-    case WM_RBUTTONUP:
+-    case WM_MBUTTONUP:
+-    case WM_XBUTTONUP:
+-      OnMouseUp(e, destruction_receiver);
+-      break;
+-    case WM_MOUSEMOVE:
+-      OnMouseMove(e, destruction_receiver);
+-      break;
+-    case WM_MOUSEWHEEL:
+-      OnMouseWheel(e, destruction_receiver);
+-      break;
+-    default:
+-      break;
+-  }
+-  // Returning immediately anyway - no need to check
+-  // destruction_receiver.IsWindowDestroyed().
+-  return e.is_handled();
+-}
+-
+-bool Win32Window::HandleKeyboard(UINT message, WPARAM wParam, LPARAM lParam,
+-                                 WindowDestructionReceiver& destruction_receiver) {
+-  KeyEvent e(this, VirtualKey(wParam), lParam & 0xFFFF, !!(lParam & (LPARAM(1) << 30)),
+-             !!(GetKeyState(VK_SHIFT) & 0x80), !!(GetKeyState(VK_CONTROL) & 0x80),
+-             !!(GetKeyState(VK_MENU) & 0x80), !!(GetKeyState(VK_LWIN) & 0x80));
+-  switch (message) {
+-    case WM_KEYDOWN:
+-      OnKeyDown(e, destruction_receiver);
+-      break;
+-    case WM_KEYUP:
+-      OnKeyUp(e, destruction_receiver);
+-      break;
+-    case WM_CHAR:
+-      OnKeyChar(e, destruction_receiver);
+-      break;
+-    default:
+-      break;
+-  }
+-  // Returning immediately anyway - no need to check
+-  // destruction_receiver.IsWindowDestroyed().
+-  return e.is_handled();
+-}
+-
+-void Win32Window::SetCursorIfFocusedOnClientArea(HCURSOR cursor) const {
+-  if (!HasFocus()) {
+-    return;
+-  }
+-  POINT cursor_pos;
+-  if (!GetCursorPos(&cursor_pos)) {
+-    return;
+-  }
+-  if (WindowFromPoint(cursor_pos) == hwnd_ &&
+-      SendMessage(hwnd_, WM_NCHITTEST, 0, MAKELONG(cursor_pos.x, cursor_pos.y)) == HTCLIENT) {
+-    SetCursor(cursor);
+-  }
+-}
+-
+-void Win32Window::SetCursorAutoHideTimer() {
+-  // Reset the timer by deleting the old timer and creating the new one.
+-  // ChangeTimerQueueTimer doesn't work if the timer has already expired.
+-  if (cursor_auto_hide_timer_) {
+-    DeleteTimerQueueTimer(nullptr, cursor_auto_hide_timer_, nullptr);
+-    cursor_auto_hide_timer_ = nullptr;
+-  }
+-  // After making sure that the callback is not callable anymore
+-  // (DeleteTimerQueueTimer waits for the completion of the callback if it has
+-  // been called already, or cancels it if it's hasn't), update the most recent
+-  // message revision.
+-  last_cursor_auto_hide_queued = last_cursor_auto_hide_signaled + 1;
+-  CreateTimerQueueTimer(&cursor_auto_hide_timer_, nullptr, AutoHideCursorTimerCallback, this,
+-                        kDefaultCursorAutoHideMilliseconds, 0,
+-                        WT_EXECUTEINTIMERTHREAD | WT_EXECUTEONLYONCE);
+-}
+-
+-void Win32Window::AutoHideCursorTimerCallback(void* parameter, BOOLEAN timer_or_wait_fired) {
+-  if (!timer_or_wait_fired) {
+-    // Not a timer callback.
+-    return;
+-  }
+-  Win32Window& window = *static_cast<Win32Window*>(parameter);
+-  window.last_cursor_auto_hide_signaled = window.last_cursor_auto_hide_queued;
+-  SendMessage(window.hwnd_, kUserMessageAutoHideCursor, window.last_cursor_auto_hide_signaled, 0);
+-}
+-
+-LRESULT Win32Window::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+-  if (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) {
+-    WindowDestructionReceiver destruction_receiver(this);
+-    // Returning immediately anyway - no need to check
+-    // destruction_receiver.IsWindowDestroyed() afterwards.
+-    return HandleMouse(message, wParam, lParam, destruction_receiver)
+-               ? 0
+-               : DefWindowProcW(hWnd, message, wParam, lParam);
+-  }
+-  if (message >= WM_KEYFIRST && message <= WM_KEYLAST) {
+-    WindowDestructionReceiver destruction_receiver(this);
+-    // Returning immediately anyway - no need to check
+-    // destruction_receiver.IsWindowDestroyed() afterwards.
+-    return HandleKeyboard(message, wParam, lParam, destruction_receiver)
+-               ? 0
+-               : DefWindowProcW(hWnd, message, wParam, lParam);
+-  }
+-
+-  switch (message) {
+-    case WM_CLOSE:
+-    // In case the Windows window was somehow forcibly destroyed without
+-    // WM_CLOSE.
+-    case WM_DESTROY: {
+-      if (cursor_auto_hide_timer_) {
+-        DeleteTimerQueueTimer(nullptr, cursor_auto_hide_timer_, nullptr);
+-        cursor_auto_hide_timer_ = nullptr;
+-      }
+-      {
+-        WindowDestructionReceiver destruction_receiver(this);
+-        OnBeforeClose(destruction_receiver);
+-        if (destruction_receiver.IsWindowDestroyed()) {
+-          break;
+-        }
+-      }
+-      // Set hwnd_ to null to ignore events from now on since this Win32Window
+-      // is entering an indeterminate state - this should be done at some point
+-      // in closing anyway.
+-      hwnd_ = nullptr;
+-      SetWindowLongPtr(hWnd, GWLP_USERDATA, 0);
+-      if (message != WM_DESTROY) {
+-        DestroyWindow(hWnd);
+-      }
+-      OnAfterClose();
+-    } break;
+-
+-    case WM_DROPFILES: {
+-      HDROP drop_handle = reinterpret_cast<HDROP>(wParam);
+-      auto drop_count = DragQueryFileW(drop_handle, 0xFFFFFFFFu, nullptr, 0);
+-      if (drop_count > 0) {
+-        // Get required buffer size
+-        UINT path_size = DragQueryFileW(drop_handle, 0, nullptr, 0);
+-        if (path_size > 0 && path_size < 0xFFFFFFFFu) {
+-          std::u16string path;
+-          ++path_size;             // Ensure space for the null terminator
+-          path.resize(path_size);  // Reserve space
+-          // Only getting first file dropped (other files ignored)
+-          path_size = DragQueryFileW(drop_handle, 0, (LPWSTR)&path[0], path_size);
+-          if (path_size > 0) {
+-            path.resize(path_size);  // Will drop the null terminator
+-            FileDropEvent e(this, rex::to_path(path));
+-            WindowDestructionReceiver destruction_receiver(this);
+-            OnFileDrop(e, destruction_receiver);
+-            if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-              DragFinish(drop_handle);
+-              break;
+-            }
+-          }
+-        }
+-      }
+-      DragFinish(drop_handle);
+-    } break;
+-
+-    case WM_MOVE: {
+-      MonitorUpdateEvent e(this, false);
+-      OnMonitorUpdate(e);
+-    } break;
+-
+-    case WM_SIZE: {
+-      if (batched_size_update_depth_) {
+-        batched_size_update_contained_wm_size_ = true;
+-      } else {
+-        WindowDestructionReceiver destruction_receiver(this);
+-        HandleSizeUpdate(destruction_receiver);
+-        if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-          break;
+-        }
+-      }
+-    } break;
+-
+-    case WM_PAINT: {
+-      if (batched_size_update_depth_) {
+-        // Avoid painting an outdated surface during a batched size update when
+-        // WM_SIZE handling is deferred.
+-        batched_size_update_contained_wm_paint_ = true;
+-      } else {
+-        ValidateRect(hwnd_, nullptr);
+-        OnPaint();
+-      }
+-      // Custom painting via OnPaint - don't pass to DefWindowProc.
+-      return 0;
+-    } break;
+-
+-    case WM_ERASEBKGND: {
+-      if (HasSurface()) {
+-        // Don't erase between paints because painting may be dropped if nothing
+-        // has changed since the last one.
+-        return 0;
+-      }
+-    } break;
+-
+-    case WM_DISPLAYCHANGE: {
+-      MonitorUpdateEvent e(this, true);
+-      OnMonitorUpdate(e);
+-    } break;
+-
+-    case WM_DPICHANGED: {
+-      // Note that for some reason, WM_DPICHANGED is not sent when the window is
+-      // borderless fullscreen with per-monitor DPI awareness v1.
+-
+-      dpi_ = GetCurrentDpi();
+-
+-      WindowDestructionReceiver destruction_receiver(this);
+-
+-      {
+-        UISetupEvent e(this);
+-        OnDpiChanged(e, destruction_receiver);
+-        // The window might have been closed by the handler, check hwnd_ too
+-        // since it's needed below.
+-        if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-          break;
+-        }
+-      }
+-
+-      auto rect = reinterpret_cast<const RECT*>(lParam);
+-      if (rect) {
+-        // SetWindowPos arguments according to WM_DPICHANGED MSDN documentation.
+-        // https://docs.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged
+-        // There's no need to handle the maximized state any special way (by
+-        // updating the window placement instead of the window position in this
+-        // case, for instance), as Windows (by design) restores the window when
+-        // changing the DPI to a new one.
+-        SetWindowPos(hwnd_, nullptr, int(rect->left), int(rect->top), int(rect->right - rect->left),
+-                     int(rect->bottom - rect->top), SWP_NOZORDER | SWP_NOACTIVATE);
+-        if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-          break;
+-        }
+-      }
+-    } break;
+-
+-    case WM_KILLFOCUS: {
+-      WindowDestructionReceiver destruction_receiver(this);
+-      OnFocusUpdate(false, destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        break;
+-      }
+-    } break;
+-
+-    case WM_SETFOCUS: {
+-      WindowDestructionReceiver destruction_receiver(this);
+-      OnFocusUpdate(true, destruction_receiver);
+-      if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+-        break;
+-      }
+-    } break;
+-
+-    case WM_SETCURSOR: {
+-      if (reinterpret_cast<HWND>(wParam) == hwnd_ && HasFocus() && LOWORD(lParam) == HTCLIENT) {
+-        switch (GetCursorVisibility()) {
+-          case CursorVisibility::kAutoHidden: {
+-            // Always revealing the cursor in case of events like clicking, but
+-            // WM_MOUSEMOVE messages may be sent for reasons not always
+-            // involving actual mouse movement performed by the user. Revealing
+-            // the cursor in case of movement is done in HandleMouse instead.
+-            if (HIWORD(lParam) != WM_MOUSEMOVE) {
+-              cursor_currently_auto_hidden_ = false;
+-              SetCursorAutoHideTimer();
+-            }
+-            if (cursor_currently_auto_hidden_) {
+-              SetCursor(nullptr);
+-              return TRUE;
+-            }
+-          } break;
+-          case CursorVisibility::kHidden:
+-            SetCursor(nullptr);
+-            return TRUE;
+-          default:
+-            break;
+-        }
+-      }
+-      // For the non-client area, and for visible cursor, letting normal
+-      // processing happen, setting the cursor to an arrow or to something
+-      // specific to non-client parts of the window.
+-    } break;
+-
+-    case kUserMessageAutoHideCursor: {
+-      // Recheck the cursor visibility - the callback might have been called
+-      // before or while the timer is deleted. Also ignore messages from
+-      // outdated mouse interactions.
+-      if (GetCursorVisibility() == CursorVisibility::kAutoHidden &&
+-          wParam == last_cursor_auto_hide_queued) {
+-        // The timer object is not needed anymore.
+-        if (cursor_auto_hide_timer_) {
+-          DeleteTimerQueueTimer(nullptr, cursor_auto_hide_timer_, nullptr);
+-          cursor_auto_hide_timer_ = nullptr;
+-        }
+-        cursor_currently_auto_hidden_ = true;
+-        SetCursorIfFocusedOnClientArea(nullptr);
+-      }
+-      return 0;
+-    } break;
+-
+-    case WM_TABLET_QUERYSYSTEMGESTURESTATUS:
+-      return
+-          // disables press and hold (right-click) gesture
+-          TABLET_DISABLE_PRESSANDHOLD |
+-          // disables UI feedback on pen up (waves)
+-          TABLET_DISABLE_PENTAPFEEDBACK |
+-          // disables UI feedback on pen button down (circle)
+-          TABLET_DISABLE_PENBARRELFEEDBACK |
+-          // disables pen flicks (back, forward, drag down, drag up)
+-          TABLET_DISABLE_FLICKS | TABLET_DISABLE_TOUCHSWITCH | TABLET_DISABLE_SMOOTHSCROLLING |
+-          TABLET_DISABLE_TOUCHUIFORCEON | TABLET_ENABLE_MULTITOUCHDATA;
+-
+-    case WM_MENUCOMMAND: {
+-      MENUINFO menu_info = {};
+-      menu_info.cbSize = sizeof(menu_info);
+-      menu_info.fMask = MIM_MENUDATA;
+-      GetMenuInfo(HMENU(lParam), &menu_info);
+-      auto parent_item = reinterpret_cast<Win32MenuItem*>(menu_info.dwMenuData);
+-      auto child_item = reinterpret_cast<Win32MenuItem*>(parent_item->child(wParam));
+-      assert_not_null(child_item);
+-      WindowDestructionReceiver destruction_receiver(this);
+-      child_item->OnSelected();
+-      if (destruction_receiver.IsWindowDestroyed()) {
+-        break;
+-      }
+-      // The menu item might have been destroyed by its OnSelected, don't do
+-      // anything with it here from now on.
+-    } break;
+-  }
+-
+-  // The window might have been destroyed by the handlers, don't interact with
+-  // *this in this function from now on.
+-
+-  // Passing the original hWnd argument rather than hwnd_ as the window might
+-  // have been closed or destroyed by a handler, making hwnd_ null even though
+-  // DefWindowProc still needs to be called to propagate the closing-related
+-  // messages needed by Windows, or inaccessible (due to use-after-free) at all.
+-  return DefWindowProcW(hWnd, message, wParam, lParam);
+-}
+-
+-LRESULT CALLBACK Win32Window::WndProcThunk(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+-  if (hWnd) {
+-    Win32Window* window = nullptr;
+-    if (message == WM_NCCREATE) {
+-      auto create_struct = reinterpret_cast<LPCREATESTRUCT>(lParam);
+-      window = reinterpret_cast<Win32Window*>(create_struct->lpCreateParams);
+-      SetWindowLongPtr(hWnd, GWLP_USERDATA, (__int3264)(LONG_PTR)window);
+-      // Don't miss any messages (as they may have effect on the actual state
+-      // stored in Win32Window) sent before the completion of CreateWindowExW
+-      // dropped because `window->hwnd_ != hWnd`, when the result of
+-      // CreateWindowExW still hasn't been assigned to `hwnd_` (however, don't
+-      // reattach this window to a closed window if WM_NCCREATE was somehow sent
+-      // to a window being closed).
+-      if (window->phase() == Phase::kOpening) {
+-        assert_true(!window->hwnd_ || window->hwnd_ == hWnd);
+-        window->hwnd_ = hWnd;
+-      }
+-      // Enable non-client area DPI scaling for AdjustWindowRectExForDpi to work
+-      // correctly between Windows 10 1607 (when AdjustWindowRectExForDpi and
+-      // EnableNonClientDpiScaling were added) and 1703 (when per-monitor
+-      // awareness version 2 was added with automatically enabled non-client
+-      // area DPI scaling).
+-      const Win32WindowedAppContext& win32_app_context =
+-          static_cast<const Win32WindowedAppContext&>(window->app_context());
+-      const Win32WindowedAppContext::PerMonitorDpiV2Api* per_monitor_dpi_v2_api =
+-          win32_app_context.per_monitor_dpi_v2_api();
+-      if (per_monitor_dpi_v2_api) {
+-        per_monitor_dpi_v2_api->enable_non_client_dpi_scaling(hWnd);
+-      }
+-      // Already fully handled, no need to call Win32Window::WndProc.
+-    } else {
+-      window = reinterpret_cast<Win32Window*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+-      if (window && window->hwnd_ == hWnd) {
+-        return window->WndProc(hWnd, message, wParam, lParam);
+-      }
+-    }
+-  }
+-  return DefWindowProcW(hWnd, message, wParam, lParam);
+-}
+-
+-std::unique_ptr<ui::MenuItem> MenuItem::Create(Type type, const std::string& text,
+-                                               const std::string& hotkey,
+-                                               std::function<void()> callback) {
+-  return std::make_unique<Win32MenuItem>(type, text, hotkey, callback);
+-}
+-
+-Win32MenuItem::Win32MenuItem(Type type, const std::string& text, const std::string& hotkey,
+-                             std::function<void()> callback)
+-    : MenuItem(type, text, hotkey, std::move(callback)) {
+-  switch (type) {
+-    case MenuItem::Type::kNormal:
+-      handle_ = CreateMenu();
+-      break;
+-    case MenuItem::Type::kPopup:
+-      handle_ = CreatePopupMenu();
+-      break;
+-    default:
+-      // May just be a placeholder.
+-      break;
+-  }
+-  if (handle_) {
+-    MENUINFO menu_info = {};
+-    menu_info.cbSize = sizeof(menu_info);
+-    menu_info.fMask = MIM_MENUDATA | MIM_STYLE;
+-    menu_info.dwMenuData = ULONG_PTR(this);
+-    menu_info.dwStyle = MNS_NOTIFYBYPOS;
+-    SetMenuInfo(handle_, &menu_info);
+-  }
+-}
+-
+-Win32MenuItem::~Win32MenuItem() {
+-  if (handle_) {
+-    DestroyMenu(handle_);
+-  }
+-}
+-
+-void Win32MenuItem::SetEnabled(bool enabled) {
+-  UINT enable_flags = MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED);
+-  UINT i = 0;
+-  for (auto iter = children_.begin(); iter != children_.end(); ++iter, ++i) {
+-    EnableMenuItem(handle_, i, enable_flags);
+-  }
+-}
+-
+-void Win32MenuItem::OnChildAdded(MenuItem* generic_child_item) {
+-  auto child_item = static_cast<Win32MenuItem*>(generic_child_item);
+-
+-  switch (child_item->type()) {
+-    case MenuItem::Type::kNormal:
+-      // Nothing special.
+-      break;
+-    case MenuItem::Type::kPopup: {
+-      auto wide_text = rex::string::to_utf16(child_item->text());
+-      AppendMenuW(handle_, MF_POPUP, reinterpret_cast<UINT_PTR>(child_item->handle()),
+-                  reinterpret_cast<LPCWSTR>(wide_text.c_str()));
+-    } break;
+-    case MenuItem::Type::kSeparator:
+-      AppendMenuW(handle_, MF_SEPARATOR, UINT_PTR(child_item->handle_), 0);
+-      break;
+-    case MenuItem::Type::kString:
+-      auto full_name = child_item->text();
+-      if (!child_item->hotkey().empty()) {
+-        full_name += "\t" + child_item->hotkey();
+-      }
+-      auto wide_name = rex::string::to_utf16(full_name);
+-      AppendMenuW(handle_, MF_STRING, UINT_PTR(child_item->handle_),
+-                  reinterpret_cast<LPCWSTR>(wide_name.c_str()));
+-      break;
+-  }
+-}
+-
+-void Win32MenuItem::OnChildRemoved(MenuItem* generic_child_item) {}
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_gtk.cpp b/thirdparty/rexglue-sdk/src/ui/windowed_app_context_gtk.cpp
+deleted file mode 100644
+index 4e861387..00000000
+--- a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_gtk.cpp
++++ /dev/null
+@@ -1,106 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2021 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <rex/ui/windowed_app_context_gtk.h>
+-
+-#include <gdk/gdk.h>
+-#include <glib.h>
+-#include <gtk/gtk.h>
+-
+-namespace rex {
+-namespace ui {
+-
+-GTKWindowedAppContext::~GTKWindowedAppContext() {
+-  // Remove the idle sources as their data pointer (to this context) is now
+-  // outdated.
+-  if (quit_idle_pending_) {
+-    g_source_remove(quit_idle_pending_);
+-  }
+-  if (pending_functions_idle_pending_) {
+-    g_source_remove(pending_functions_idle_pending_);
+-  }
+-}
+-
+-void GTKWindowedAppContext::NotifyUILoopOfPendingFunctions() {
+-  std::lock_guard<std::mutex> pending_functions_idle_pending_lock(
+-      pending_functions_idle_pending_mutex_);
+-  if (!pending_functions_idle_pending_) {
+-    pending_functions_idle_pending_ = gdk_threads_add_idle(PendingFunctionsSourceFunc, this);
+-  }
+-}
+-
+-void GTKWindowedAppContext::PlatformQuitFromUIThread() {
+-  if (quit_idle_pending_ || !gtk_main_level()) {
+-    return;
+-  }
+-  gtk_main_quit();
+-  // Quit from all loops in the context, current inner, upcoming inner (this is
+-  // why the idle function is added even at the main level of 1), until we can
+-  // return to the tail of RunMainGTKLoop.
+-  quit_idle_pending_ = gdk_threads_add_idle(QuitSourceFunc, this);
+-}
+-
+-void GTKWindowedAppContext::RunMainGTKLoop() {
+-  // For safety, in case the quit request somehow happened before the loop.
+-  if (HasQuitFromUIThread()) {
+-    return;
+-  }
+-  assert_zero(gtk_main_level());
+-  gtk_main();
+-  // Something else - not QuitFromUIThread - might have done gtk_main_quit for
+-  // the outer loop. If it has exited for some reason, let the context know, so
+-  // pending function won't be added pointlessly.
+-  QuitFromUIThread();
+-  // Don't interfere with main loops of other contexts that will possibly be
+-  // executed in this thread later (if this is not the only app that will be
+-  // executed in this process, for example, or if some WindowedAppContext-less
+-  // dialog is opened after the windowed app has quit) - cancel the scheduled
+-  // quit chain as we have quit already.
+-  if (quit_idle_pending_) {
+-    g_source_remove(quit_idle_pending_);
+-    quit_idle_pending_ = 0;
+-  }
+-}
+-
+-gboolean GTKWindowedAppContext::PendingFunctionsSourceFunc(gpointer data) {
+-  auto& app_context = *static_cast<GTKWindowedAppContext*>(data);
+-  // Allow new pending function notifications to be made, and stop tracking the
+-  // lifetime of the idle source that is already being executed and thus
+-  // removed. This must be done before executing the functions (if done after,
+-  // notifications may be missed if they happen between the execution of the
+-  // functions and the reset of pending_functions_idle_pending_).
+-  {
+-    std::lock_guard<std::mutex> pending_functions_idle_pending_lock(
+-        app_context.pending_functions_idle_pending_mutex_);
+-    app_context.pending_functions_idle_pending_ = 0;
+-  }
+-  app_context.ExecutePendingFunctionsFromUIThread();
+-  return G_SOURCE_REMOVE;
+-}
+-
+-gboolean GTKWindowedAppContext::QuitSourceFunc(gpointer data) {
+-  auto app_context = static_cast<GTKWindowedAppContext*>(data);
+-  guint main_level = gtk_main_level();
+-  assert_not_zero(main_level);
+-  if (!main_level) {
+-    app_context->quit_idle_pending_ = 0;
+-    return G_SOURCE_REMOVE;
+-  }
+-  gtk_main_quit();
+-  // Quit from all loops in the context, current inner, upcoming inner (this is
+-  // why the idle function is added even at the main level of 1), until we can
+-  // return to the tail of RunMainGTKLoop.
+-  app_context->quit_idle_pending_ = gdk_threads_add_idle(QuitSourceFunc, app_context);
+-  return G_SOURCE_REMOVE;
+-}
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp b/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp
+new file mode 100644
+index 00000000..9eb22642
+--- /dev/null
++++ b/thirdparty/rexglue-sdk/src/ui/windowed_app_context_sdl.cpp
+@@ -0,0 +1,145 @@
++/**
++ * @file        ui/windowed_app_context_sdl.cpp
++ * @brief       SDL3 implementation of the windowed app UI loop context
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#include <rex/ui/windowed_app_context_sdl.h>
++
++#include <cstdlib>
++#include <string>
++
++#include <SDL3/SDL.h>
++
++#include <rex/cvar.h>
++#include <rex/logging.h>
++#include <rex/ui/flags.h>
++#include <rex/platform.h>
++#include <rex/ui/window_sdl.h>
++
++namespace rex::ui {
++
++SDLWindowedAppContext::~SDLWindowedAppContext() {
++  // Execute leftover pending functions before the loop machinery goes away,
++  // mirroring the shutdown contract documented in WindowedAppContext.
++  ExecutePendingFunctionsFromUIThread();
++  if (SDL_WasInit(SDL_INIT_VIDEO)) {
++    SDL_QuitSubSystem(SDL_INIT_VIDEO);
++  }
++}
++
++bool SDLWindowedAppContext::Initialize() {
++  // Picked before SDL_InitSubSystem, long before a graphics instance can say
++  // which surface extensions it has, so the cvar is the escape hatch.
++  std::string requested_driver = REXCVAR_GET(video_driver);
++  if (!requested_driver.empty()) {
++    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, requested_driver.c_str());
++  }
++  if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
++    REXLOG_ERROR("SDL_InitSubSystem(SDL_INIT_VIDEO) failed: {}", SDL_GetError());
++    return false;
++  }
++  const char* video_driver_in_use = SDL_GetCurrentVideoDriver();
++  REXLOG_INFO("SDL video driver: {}", video_driver_in_use ? video_driver_in_use : "unknown");
++  uint32_t first = SDL_RegisterEvents(2);
++  if (first == 0) {
++    REXLOG_ERROR("SDL_RegisterEvents failed: {}", SDL_GetError());
++    return false;
++  }
++  wakeup_event_type_ = first;
++  paint_event_type_ = first + 1;
++  return true;
++}
++
++void SDLWindowedAppContext::NotifyUILoopOfPendingFunctions() {
++  // SDL_PushEvent is thread-safe by SDL contract.
++  SDL_Event event{};
++  event.type = wakeup_event_type_;
++  SDL_PushEvent(&event);
++}
++
++void SDLWindowedAppContext::PlatformQuitFromUIThread() {
++  // RunMainMessageLoop re-checks HasQuitFromUIThread after every event; a
++  // wakeup guarantees SDL_WaitEvent returns promptly if the queue is empty.
++  NotifyUILoopOfPendingFunctions();
++}
++
++int SDLWindowedAppContext::RunMainMessageLoop() {
++  while (!HasQuitFromUIThread()) {
++    SDL_Event event;
++    if (!SDL_WaitEvent(&event)) {
++      REXLOG_ERROR("SDL_WaitEvent failed: {}", SDL_GetError());
++      return EXIT_FAILURE;
++    }
++    ProcessEvent(event);
++  }
++  return EXIT_SUCCESS;
++}
++
++void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
++  if (event.type == wakeup_event_type_) {
++    ExecutePendingFunctionsFromUIThread();
++    return;
++  }
++  if (event.type == paint_event_type_) {
++    if (WindowSDL* window = GetWindow(event.user.windowID)) {
++      window->HandlePaintEvent();
++    }
++    return;
++  }
++  if (event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST) {
++    if (WindowSDL* window = GetWindow(event.window.windowID)) {
++      window->HandleWindowEvent(event);
++    }
++    return;
++  }
++  switch (event.type) {
++    case SDL_EVENT_KEY_DOWN:
++    case SDL_EVENT_KEY_UP: {
++      if (WindowSDL* window = GetWindow(event.key.windowID)) {
++        window->HandleKeyEvent(event);
++      }
++      break;
++    }
++    case SDL_EVENT_TEXT_INPUT: {
++      if (WindowSDL* window = GetWindow(event.text.windowID)) {
++        window->HandleTextInputEvent(event);
++      }
++      break;
++    }
++    case SDL_EVENT_MOUSE_MOTION: {
++      if (WindowSDL* window = GetWindow(event.motion.windowID)) {
++        window->HandleMouseEvent(event);
++      }
++      break;
++    }
++    case SDL_EVENT_MOUSE_BUTTON_DOWN:
++    case SDL_EVENT_MOUSE_BUTTON_UP: {
++      if (WindowSDL* window = GetWindow(event.button.windowID)) {
++        window->HandleMouseEvent(event);
++      }
++      break;
++    }
++    case SDL_EVENT_MOUSE_WHEEL: {
++      if (WindowSDL* window = GetWindow(event.wheel.windowID)) {
++        window->HandleMouseEvent(event);
++      }
++      break;
++    }
++    case SDL_EVENT_DROP_FILE: {
++      if (WindowSDL* window = GetWindow(event.drop.windowID)) {
++        window->HandleDropEvent(event);
++      }
++      break;
++    }
++    default:
++      break;
++  }
++}
++
++}  // namespace rex::ui
+diff --git a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_win.cpp b/thirdparty/rexglue-sdk/src/ui/windowed_app_context_win.cpp
+deleted file mode 100644
+index d18820d9..00000000
+--- a/thirdparty/rexglue-sdk/src/ui/windowed_app_context_win.cpp
++++ /dev/null
+@@ -1,158 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2022 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <cstdlib>
+-
+-#include <rex/platform.h>
+-#include <rex/ui/windowed_app_context_win.h>
+-
+-namespace rex {
+-namespace ui {
+-
+-bool Win32WindowedAppContext::pending_functions_window_class_registered_;
+-
+-Win32WindowedAppContext::~Win32WindowedAppContext() {
+-  if (pending_functions_hwnd_) {
+-    DestroyWindow(pending_functions_hwnd_);
+-  }
+-  if (user32_module_) {
+-    FreeLibrary(user32_module_);
+-  }
+-  if (shcore_module_) {
+-    FreeLibrary(shcore_module_);
+-  }
+-}
+-
+-bool Win32WindowedAppContext::Initialize() {
+-  // Logging possibly not initialized in this function yet.
+-
+-  // Obtain function pointers that may be used for windows if available.
+-  shcore_module_ = LoadLibraryW(L"SHCore.dll");
+-  if (shcore_module_) {
+-    per_monitor_dpi_v1_api_available_ = true;
+-    per_monitor_dpi_v1_api_available_ &=
+-        (*reinterpret_cast<void**>(&per_monitor_dpi_v1_api_.get_dpi_for_monitor) =
+-             GetProcAddress(shcore_module_, "GetDpiForMonitor")) != nullptr;
+-  }
+-  user32_module_ = LoadLibraryW(L"user32.dll");
+-  if (user32_module_) {
+-    per_monitor_dpi_v2_api_available_ = true;
+-    per_monitor_dpi_v2_api_available_ &=
+-        (*reinterpret_cast<void**>(&per_monitor_dpi_v2_api_.adjust_window_rect_ex_for_dpi) =
+-             GetProcAddress(user32_module_, "AdjustWindowRectExForDpi")) != nullptr;
+-    per_monitor_dpi_v2_api_available_ &=
+-        (*reinterpret_cast<void**>(&per_monitor_dpi_v2_api_.enable_non_client_dpi_scaling) =
+-             GetProcAddress(user32_module_, "EnableNonClientDpiScaling")) != nullptr;
+-    per_monitor_dpi_v2_api_available_ &=
+-        (*reinterpret_cast<void**>(&per_monitor_dpi_v2_api_.get_dpi_for_system) =
+-             GetProcAddress(user32_module_, "GetDpiForSystem")) != nullptr;
+-    per_monitor_dpi_v2_api_available_ &=
+-        (*reinterpret_cast<void**>(&per_monitor_dpi_v2_api_.get_dpi_for_window) =
+-             GetProcAddress(user32_module_, "GetDpiForWindow")) != nullptr;
+-  }
+-
+-  // Create the message-only window for executing pending functions - using a
+-  // window instead of executing them between iterations so non-main message
+-  // loops, such as Windows modals, can execute pending functions too.
+-  static const WCHAR kPendingFunctionsWindowClassName[] = L"RexPendingFunctionsWindowClass";
+-  if (!pending_functions_window_class_registered_) {
+-    WNDCLASSEXW pending_functions_window_class = {};
+-    pending_functions_window_class.cbSize = sizeof(pending_functions_window_class);
+-    pending_functions_window_class.lpfnWndProc = PendingFunctionsWndProc;
+-    pending_functions_window_class.hInstance = hinstance_;
+-    pending_functions_window_class.lpszClassName = kPendingFunctionsWindowClassName;
+-    if (!RegisterClassExW(&pending_functions_window_class)) {
+-      return false;
+-    }
+-    pending_functions_window_class_registered_ = true;
+-  }
+-  pending_functions_hwnd_ = CreateWindowExW(
+-      0, kPendingFunctionsWindowClassName, L"Rex Pending Functions", WS_OVERLAPPED, CW_USEDEFAULT,
+-      CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, HWND_MESSAGE, nullptr, hinstance_, this);
+-  if (!pending_functions_hwnd_) {
+-    return false;
+-  }
+-
+-  return true;
+-}
+-
+-void Win32WindowedAppContext::NotifyUILoopOfPendingFunctions() {
+-  while (!PostMessageW(pending_functions_hwnd_, kPendingFunctionsWindowClassMessageExecute, 0, 0)) {
+-    Sleep(1);
+-  }
+-}
+-
+-void Win32WindowedAppContext::PlatformQuitFromUIThread() {
+-  // Send WM_QUIT to whichever loop happens to process it - may be the loop of a
+-  // built-in modal window, which is unaware of HasQuitFromUIThread, don't let
+-  // it delay quitting indefinitely.
+-  PostQuitMessage(EXIT_SUCCESS);
+-}
+-
+-int Win32WindowedAppContext::RunMainMessageLoop() {
+-  int result = EXIT_SUCCESS;
+-  MSG message;
+-  // The HasQuitFromUIThread check is not absolutely required, but for
+-  // additional safety in case WM_QUIT is not received for any reason.
+-  while (!HasQuitFromUIThread()) {
+-    BOOL message_result = GetMessageW(&message, nullptr, 0, 0);
+-    if (message_result == 0 || message_result == -1) {
+-      // WM_QUIT (0 - this is the primary message loop, no need to resend, also
+-      // contains the result from PostQuitMessage in wParam) or an error
+-      // (-1). Quitting the context will run the pending functions. Getting
+-      // WM_QUIT doesn't imply that QuitFromUIThread has been called already, it
+-      // may originate in some place other than PlatformQuitFromUIThread as
+-      // well - call it to finish everything including the pending functions.
+-      QuitFromUIThread();
+-      result = message_result ? EXIT_FAILURE : int(message.wParam);
+-      break;
+-    }
+-    TranslateMessage(&message);
+-    DispatchMessageW(&message);
+-  }
+-  return result;
+-}
+-
+-LRESULT CALLBACK Win32WindowedAppContext::PendingFunctionsWndProc(HWND hwnd, UINT message,
+-                                                                  WPARAM wparam, LPARAM lparam) {
+-  if (message == WM_CLOSE) {
+-    // Need the window for the entire context's lifetime, don't allow anything
+-    // to close it.
+-    return 0;
+-  }
+-  if (message == WM_NCCREATE) {
+-    SetWindowLongPtrW(
+-        hwnd, GWLP_USERDATA,
+-        reinterpret_cast<LONG_PTR>(reinterpret_cast<const CREATESTRUCTW*>(lparam)->lpCreateParams));
+-  } else {
+-    auto app_context =
+-        reinterpret_cast<Win32WindowedAppContext*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+-    if (app_context) {
+-      switch (message) {
+-        case WM_DESTROY:
+-          // The message-only window owned by the context is being destroyed,
+-          // thus the context won't be able to execute pending functions
+-          // anymore - can't continue functioning normally.
+-          app_context->QuitFromUIThread();
+-          break;
+-        case kPendingFunctionsWindowClassMessageExecute:
+-          app_context->ExecutePendingFunctionsFromUIThread();
+-          return 0;
+-        default:
+-          break;
+-      }
+-    }
+-  }
+-  return DefWindowProcW(hwnd, message, wparam, lparam);
+-}
+-
+-}  // namespace ui
+-}  // namespace rex
+diff --git a/thirdparty/rexglue-sdk/src/ui/windowed_app_main_posix.cpp b/thirdparty/rexglue-sdk/src/ui/windowed_app_main_posix.cpp
+deleted file mode 100644
+index ebabe7f6..00000000
+--- a/thirdparty/rexglue-sdk/src/ui/windowed_app_main_posix.cpp
++++ /dev/null
+@@ -1,79 +0,0 @@
+-/**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2021 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
+- *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+- */
+-
+-#include <cstdio>
+-#include <cstdlib>
+-#include <map>
+-#include <memory>
+-#include <string>
+-#include <vector>
+-
+-#include <rex/cvar.h>
+-#include <rex/logging.h>
+-#include <rex/ui/windowed_app.h>
+-#include <rex/ui/windowed_app_context_gtk.h>
+-
+-#include <gtk/gtk.h>
+-
+-extern "C" int main(int argc_pre_gtk, char** argv_pre_gtk) {
+-  // Before touching anything GTK+, make sure that when running on Wayland,
+-  // we'll still get an X11 (Xwayland) window
+-  setenv("GDK_BACKEND", "x11", 1);
+-
+-  // Initialize GTK+, which will handle and remove its own arguments from argv.
+-  // Both GTK+ and Xenia use --option=value argument format (see man
+-  // gtk-options), however, it's meaningless to try to parse the same argument
+-  // both as a GTK+ one and as a cvar. Make GTK+ options take precedence in case
+-  // of a name collision, as there's an alternative way of setting Xenia options
+-  // (the config).
+-  int argc_post_gtk = argc_pre_gtk;
+-  char** argv_post_gtk = argv_pre_gtk;
+-  if (!gtk_init_check(&argc_post_gtk, &argv_post_gtk)) {
+-    // Logging has not been initialized yet.
+-    std::fputs("Failed to initialize GTK+\n", stderr);
+-    return EXIT_FAILURE;
+-  }
+-
+-  auto remaining = rex::cvar::Init(argc_post_gtk, argv_post_gtk);
+-  rex::cvar::ApplyEnvironment();
+-  rex::InitLoggingEarly();
+-
+-  int result;
+-
+-  {
+-    rex::ui::GTKWindowedAppContext app_context;
+-
+-    std::unique_ptr<rex::ui::WindowedApp> app = rex::ui::GetWindowedAppCreator()(app_context);
+-
+-    // Match remaining positional args to app's expected options
+-    const auto& option_names = app->GetPositionalOptions();
+-    std::map<std::string, std::string> parsed;
+-    size_t count = std::min(remaining.size(), option_names.size());
+-    for (size_t i = 0; i < count; ++i) {
+-      parsed[option_names[i]] = remaining[i];
+-    }
+-    app->SetParsedArguments(std::move(parsed));
+-
+-    if (app->OnInitialize()) {
+-      app_context.RunMainGTKLoop();
+-      result = EXIT_SUCCESS;
+-    } else {
+-      result = EXIT_FAILURE;
+-    }
+-
+-    app->InvokeOnDestroy();
+-  }
+-
+-  // Logging may still be needed in the destructors.
+-  rex::ShutdownLogging();
+-
+-  return result;
+-}
+diff --git a/thirdparty/rexglue-sdk/src/ui/windowed_app_main_win.cpp b/thirdparty/rexglue-sdk/src/ui/windowed_app_main_sdl.cpp
+similarity index 60%
+rename from thirdparty/rexglue-sdk/src/ui/windowed_app_main_win.cpp
+rename to thirdparty/rexglue-sdk/src/ui/windowed_app_main_sdl.cpp
+index 69bc5e6c..77bb1dc2 100644
+--- a/thirdparty/rexglue-sdk/src/ui/windowed_app_main_win.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/windowed_app_main_sdl.cpp
+@@ -1,14 +1,15 @@
+ /**
+- ******************************************************************************
+- * Xenia : Xbox 360 Emulator Research Project                                 *
+- ******************************************************************************
+- * Copyright 2021 Ben Vanik. All rights reserved.                             *
+- * Released under the BSD license - see LICENSE in the root for more details. *
+- ******************************************************************************
++ * @file        ui/windowed_app_main_sdl.cpp
++ * @brief       Entry point for windowed applications (SDL3 windowing)
+  *
+- * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
+  */
+ 
++#include <algorithm>
+ #include <cstdlib>
+ #include <map>
+ #include <memory>
+@@ -19,11 +20,66 @@
+ #include <rex/logging.h>
+ #include <rex/platform.h>
+ #include <rex/ui/windowed_app.h>
+-#include <rex/ui/windowed_app_context_win.h>
++#include <rex/ui/windowed_app_context_sdl.h>
++
++#if REX_PLATFORM_WIN32
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <objbase.h>
++#include <shellapi.h>
++#endif
+ 
+ namespace {
+ 
+-// Convert wide argv from CommandLineToArgvW to UTF-8 argc/argv for cvar::Init
++int RunWindowedApp(int argc, char** argv) {
++  auto remaining = rex::cvar::Init(argc, argv);
++  rex::cvar::ApplyEnvironment();
++  rex::InitLoggingEarly();
++
++  int result;
++  {
++    rex::ui::SDLWindowedAppContext app_context;
++    if (!app_context.Initialize()) {
++      return EXIT_FAILURE;
++    }
++
++#if REX_PLATFORM_WIN32
++    // Apartment-threaded COM for shell dialogs.
++    if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
++      return EXIT_FAILURE;
++    }
++#endif
++
++    std::unique_ptr<rex::ui::WindowedApp> app = rex::ui::GetWindowedAppCreator()(app_context);
++
++    // Match remaining positional args to the app's expected options.
++    const auto& option_names = app->GetPositionalOptions();
++    std::map<std::string, std::string> parsed;
++    size_t count = std::min(remaining.size(), option_names.size());
++    for (size_t i = 0; i < count; ++i) {
++      parsed[option_names[i]] = remaining[i];
++    }
++    app->SetParsedArguments(std::move(parsed));
++
++    result = app->OnInitialize() ? app_context.RunMainMessageLoop() : EXIT_FAILURE;
++
++    app->InvokeOnDestroy();
++  }
++
++#if REX_PLATFORM_WIN32
++  CoUninitialize();
++#endif
++
++  return result;
++}
++
++#if REX_PLATFORM_WIN32
++// Convert wide argv from CommandLineToArgvW to UTF-8 for cvar::Init.
+ std::vector<std::string> WideArgsToUtf8(int argc, wchar_t** wargv) {
+   std::vector<std::string> args;
+   args.reserve(static_cast<size_t>(argc));
+@@ -42,70 +98,36 @@ std::vector<std::string> WideArgsToUtf8(int argc, wchar_t** wargv) {
+   }
+   return args;
+ }
++#endif
+ 
+ }  // namespace
+ 
++#if REX_PLATFORM_WIN32
++
+ int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR command_line,
+                     int show_cmd) {
++  (void)hinstance;
+   (void)hinstance_prev;
+   (void)command_line;
++  (void)show_cmd;
+ 
+-  // Convert wide command line to UTF-8 argc/argv and parse CVARs
+   int wargc = 0;
+   wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+   auto utf8_args = WideArgsToUtf8(wargc, wargv);
+   LocalFree(wargv);
+ 
+-  // Build char* argv for cvar::Init
+   std::vector<char*> argv_ptrs;
+   argv_ptrs.reserve(utf8_args.size());
+   for (auto& s : utf8_args) {
+     argv_ptrs.push_back(s.data());
+   }
+-  auto remaining = rex::cvar::Init(static_cast<int>(argv_ptrs.size()), argv_ptrs.data());
+-  rex::cvar::ApplyEnvironment();
+-  rex::InitLoggingEarly();
+-
+-  int result;
+-
+-  {
+-    rex::ui::Win32WindowedAppContext app_context(hinstance, show_cmd);
+-    // TODO(Triang3l): Initialize creates a window. Set DPI awareness via the
+-    // manifest.
+-    if (!app_context.Initialize()) {
+-      return EXIT_FAILURE;
+-    }
+-
+-    std::unique_ptr<rex::ui::WindowedApp> app = rex::ui::GetWindowedAppCreator()(app_context);
+-
+-    // Match remaining positional args to app's expected options
+-    const auto& option_names = app->GetPositionalOptions();
+-    std::map<std::string, std::string> parsed;
+-    size_t count = std::min(remaining.size(), option_names.size());
+-    for (size_t i = 0; i < count; ++i) {
+-      parsed[option_names[i]] = remaining[i];
+-    }
+-    app->SetParsedArguments(std::move(parsed));
+-
+-    // Initialize COM on the UI thread with the apartment-threaded concurrency
+-    // model, so dialogs can be used.
+-    if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
+-      return EXIT_FAILURE;
+-    }
+-
+-    // TODO: Port InitializeWin32App from Xenia
+-    // rex::InitializeWin32App(app->GetName());
+-
+-    result = app->OnInitialize() ? app_context.RunMainMessageLoop() : EXIT_FAILURE;
+-
+-    app->InvokeOnDestroy();
+-  }
+-
+-  // TODO: Port ShutdownWin32App from Xenia
+-  // Logging may still be needed in the destructors.
+-  // rex::ShutdownWin32App();
++  return RunWindowedApp(static_cast<int>(argv_ptrs.size()), argv_ptrs.data());
++}
+ 
+-  CoUninitialize();
++#else
+ 
+-  return result;
++int main(int argc, char* argv[]) {
++  return RunWindowedApp(argc, argv);
+ }
++
++#endif
+diff --git a/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt b/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt
+index 07558bc2..ed8f40ad 100644
+--- a/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt
++++ b/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt
+@@ -232,8 +232,10 @@ set(SDL_STATIC ON CACHE BOOL "" FORCE)
+ set(SDL_TEST OFF CACHE BOOL "" FORCE)
+ set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+ 
+-# Disable unused subsystems
+-set(SDL_VIDEO OFF CACHE BOOL "" FORCE)
++# Video provides the windowing/event layer; presenters create their own
++# D3D12/Vulkan surfaces from native handles, so SDL_RENDER and the SDL
++# graphics API integrations stay off.
++set(SDL_VIDEO ON CACHE BOOL "" FORCE)
+ set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+ set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+ set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+@@ -249,7 +251,8 @@ set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+ # Disable graphics APIs (unused without video)
+ set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
+ set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+-set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
++# espgaluda2-recomp (sdk-patches/0006): on, so an app renderer can make its surface with SDL_Vulkan_CreateSurface.
++set(SDL_VULKAN ON CACHE BOOL "" FORCE)
+ set(SDL_METAL OFF CACHE BOOL "" FORCE)
+ 
+ # Disable dummy drivers
+@@ -257,8 +260,11 @@ set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
+ set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
+ set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
+ 
+-# Linux audio backends
++# Linux video and audio backends. Both video drivers are always built so the
++# one in use stays a runtime choice.
+ if(UNIX AND NOT APPLE)
++    set(SDL_X11               ON  CACHE BOOL "" FORCE)
++    set(SDL_WAYLAND           ON  CACHE BOOL "" FORCE)
+     set(SDL_ALSA              ON  CACHE BOOL "" FORCE)
+     set(SDL_ALSA_SHARED       ON  CACHE BOOL "" FORCE)
+     set(SDL_PULSEAUDIO        ON  CACHE BOOL "" FORCE)

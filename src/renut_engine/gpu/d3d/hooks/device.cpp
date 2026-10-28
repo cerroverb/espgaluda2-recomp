@@ -16,6 +16,7 @@
  */
 // futari-nx: device offsets translated to Futari's XDK (tools/renut_futari_layout.py)
 #include <rex/frame_latency.h>  // banjo-nx (2026-10-19)
+#include "renut_engine/futari_renut_vblank.h"  // espgaluda2-recomp: the flip at the guest vblank
 #include "renut_engine/display_sync.h"
 #include <algorithm>
 #include <array>
@@ -867,6 +868,58 @@ void D3DDevice_RunCommandBuffer_hook(u32 device_va, u32 command_buffer,
   }
 }
 
+// espgaluda2-recomp (original code, WORKLOG.md "Game speed on high refresh displays"): the flip at the guest's
+// vertical blank. Espgaluda II's Direct3D (D3D::SynchronizeToPresentationInterval sub_821708B0, as the game's code
+// does it) queues the flip to the vblank handler (sub_82170540's flip queue) with the device's presentation interval
+// (+13804) and makes the GPU wait (WAIT_REG_MEM) until the flip has happened, so the Swap's fence, which the game
+// waits for (src/latency_patch.cpp), completes at a guest vblank at the earliest. Renut's renderer replaces that
+// with the host's present, so on a 120 Hz screen the game ran at 120 frames a second. Here the game thread, after
+// handing the frame to the render thread, waits for the vblank at which the original would flip: the next one, and
+// at least 'interval' vblanks after the previous flip (futari::renut_vblank, the 60 Hz guest vblank). A late frame
+// waits for the next vblank (the game's own slowdown); nothing is caught up.
+REXCVAR_DEFINE_BOOL(espgaluda2_renderer_vblank_flip, true, "Espgaluda2/Renut",
+                    "Renut's renderer: the game's Swap completes at the guest's 60 Hz vertical blank, as on the "
+                    "console (false: at the host's present, which makes the game run at the display's refresh)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
+namespace {
+// The device's presentation interval: +13804 (0x35EC) in sub_821708B0, the offset this file's presentation
+// parameters use too (futari-nx tools/renut_futari_layout.py: N&B 0x351C -> 0x35EC).
+constexpr u32 kDeviceOffsetPresentInterval = 0x35EC;
+uint64_t g_last_flip_vblank = 0;
+
+// The vblanks per flip for the device's presentation interval (+13804), as sub_821708B0 maps it: D3DPRESENT_INTERVAL
+// DEFAULT (0) and ONE (1) -> 1, TWO (2) -> 2, THREE (4) -> 3, anything else (IMMEDIATE 0x80000000) -> 0.
+uint32_t VblanksPerFlip(u32 interval) {
+  switch (interval) {
+  case 0:
+  case 1:
+    return 1;
+  case 2:
+    return 2;
+  case 4:
+    return 3;
+  default:
+    return 0;
+  }
+}
+
+void WaitForPresentationInterval(const u8 *device) {
+  static const bool on = REXCVAR_GET(espgaluda2_renderer_vblank_flip);
+  if (!on || !device)
+    return;
+  const u32 interval = u32(*reinterpret_cast<const be_u32 *>(device + kDeviceOffsetPresentInterval));
+  const uint32_t per_flip = VblanksPerFlip(interval);
+  if (!per_flip)
+    return;
+  const uint64_t now = futari::renut_vblank::Count();
+  const uint64_t target = std::max(now + 1, g_last_flip_vblank + per_flip);
+  // A missing vblank thread must not hang the game: after 100 ms the swap goes on.
+  futari::renut_vblank::WaitForCount(target, 100);
+  g_last_flip_vblank = std::max(target, futari::renut_vblank::Count());
+}
+} // namespace
+
 // void D3DDevice_Swap(D3DDevice *pDevice, D3DBaseTexture *pFrontBuffer,
 //     const D3DVIDEO_SCALER_PARAMETERS *pParameters) [0x82287590]
 // The frame goes to the render thread, which presents it; the game thread
@@ -947,6 +1000,7 @@ void D3DDevice_Swap_hook(u32 device_va, u32 front_buffer, u32 /*parameters*/) {
     native::RewindRing(native::DeviceAt(device_va));
     native::ResetAllState(native::DeviceAt(device_va));
   }
+  WaitForPresentationInterval(device);
 }
 
 // void D3DDevice_InsertCallback(D3DDevice*, D3DCALLBACKTYPE, D3DCALLBACK pCallback,

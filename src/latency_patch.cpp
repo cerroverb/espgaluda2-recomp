@@ -15,6 +15,9 @@
 #include "generated/default/espgaluda2_recomp_init.h"
 
 #include <rex/cvar.h>
+#include <rex/logging.h>
+
+#include <chrono>
 
 #include "renut_engine/futari_renut_yield.h"
 
@@ -31,7 +34,26 @@ constexpr uint32_t kFenceWaitMode = 3;            // r5 used by the game's own c
 extern "C" REX_FUNC(__imp__sub_82170CE0);
 extern "C" REX_FUNC(sub_82173AE8);
 
+namespace {
+// Diagnostic (original code, WORKLOG.md "Game speed on high refresh displays"): the game's Swaps per 10 s, counted
+// here because every Swap of either renderer enters this hook first. The game runs one update per Swap.
+void CountSwap() {
+  using Clock = std::chrono::steady_clock;
+  static Clock::time_point start = Clock::now();
+  static uint32_t swaps = 0;
+  ++swaps;
+  const auto now = Clock::now();
+  const double seconds = std::chrono::duration<double>(now - start).count();
+  if (seconds >= 10.0) {
+    REXLOG_INFO("[speed] {} game Swaps in {:.2f} s: {:.2f} a second", swaps, seconds, swaps / seconds);
+    swaps = 0;
+    start = now;
+  }
+}
+}  // namespace
+
 extern "C" REX_FUNC(sub_82170CE0) {
+  CountSwap();
   // With Renut's renderer (--espgaluda2_renderer=renut) its own Swap replaces this one, latency patch included
   // (futari-nx's FUTARI_RENUT_YIELD; tools/renut_hooks.py leaves this address to this hook).
   FUTARI_RENUT_YIELD(D3DDevice_Swap)
