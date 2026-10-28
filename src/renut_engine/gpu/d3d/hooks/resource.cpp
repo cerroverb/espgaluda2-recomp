@@ -26,6 +26,7 @@
 #include <mutex>
 #include <unordered_set>
 
+#include <rex/cvar.h>
 #include <rex/hook.h>
 
 #include "renut_engine/gpu/banjo_renut_select.h"
@@ -640,12 +641,19 @@ Subresource SubresourceLayout(u32 texture, u32 slice, u32 level) {
 // Locks
 // ---------------------------------------------------------------------------
 
+// espgaluda2-recomp: see LockResource (espgaluda2_renderer_nooverwrite_wait).
+REXCVAR_DEFINE_BOOL(espgaluda2_renderer_nooverwrite_wait, true, "Espgaluda2/Renut",
+                    "Renut's renderer: a no-overwrite lock of a vertex or index buffer waits for the work issued so "
+                    "far (the sprite batcher's buffer pool; off draws garbage on busy frames)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 // D3D's resource lock (sub_82654968): waits for the GPU to be done with the
 // resource (its read fence for a read-only lock), notes the range the CPU
 // writes (BaseFlush / MipFlush, in 128-byte lines) and counts the lock.
 // Returns the address the CPU writes at.
 u32 LockResource(u32 resource, u32 mip_lock, u32 base_address, u32 mip_address, u32 address,
                  u32 size, u32 flags) {
+  static const bool kNoOverwriteWaits = REXCVAR_GET(espgaluda2_renderer_nooverwrite_wait);
   auto *r = GuestPtr<be_u32>(resource);
   if (!r)
     return address;
@@ -656,6 +664,17 @@ u32 LockResource(u32 resource, u32 mip_lock, u32 base_address, u32 mip_address, 
   const u32 fence = LoadU32(fenced + ((flags & 0x1010) ? 0xC : 0x8));
   if (fence)
     native::BlockOnFence(native::GlobalDevice(), fence);
+  // espgaluda2-recomp (original code, WORKLOG.md "Corruption"): a no-overwrite lock (D3DLOCK_NOOVERWRITE, 0x1000) of a
+  // vertex or index buffer waits for the work issued so far. Espgaluda II's sprite batcher (sub_820E41D0) rotates a
+  // pool of vertex/index buffers locked no-overwrite, trusting the GPU to have read a buffer before the rotation comes
+  // back to it, as the console's GPU has after the ring's frequent kicks. This renderer reads a draw's vertices only at
+  // the next kick, on the render thread (draw.cpp FlushVertexFillsLocked), about 3 times a frame: on busy frames the
+  // rotation wrapped first and earlier draws read the overwritten data (sprite atlas garbage).
+  if ((flags & 0x1000) && kNoOverwriteWaits && ((common & 0xF) == 1 || (common & 0xF) == 2)) {
+    const u32 device_va = native::GlobalDevice();
+    if (const u32 current = native::DeviceAt(device_va).W(native::off::FenceTag))
+      native::BlockOnFence(device_va, current);
+  }
   // Unless the lock is read-only or no-overwrite, D3D would then queue a GPU
   // cache invalidation of the range (into the ring, or for another thread a
   // range at device +0x2E30); the host has no GPU caches over guest memory.

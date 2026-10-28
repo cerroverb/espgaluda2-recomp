@@ -46,6 +46,9 @@ D3DDevice_ClearF                       82165FF8  map_B: called by Clear with reN
 D3DDevice_Clear                        82166120  map_B: (count, rects, flags, color, Z, stencil)
 D3DDevice_DrawIndexedVertices          821661E0  map_A: (prim, base_vertex, start_index, index_count); index buffer +0x3144. Not in futari's list: Espgaluda's draw path
 D3DDevice_Resolve                      8216DAF8  map_B: 961 instructions, size 0xF08 = futari's
+D3D_LockResource                       8216F9D8  WORKLOG "Corruption": the common lock; texture level -> parent (+24), fence +8 / +0xC by flags & 0x1010, device via the VdGlobalDevice slot, flags as 9th argument (+276 in its 192-byte frame); called by LockSurface and the two locks below
+D3DVertexBuffer_Lock                   8216FDA0  WORKLOG "Corruption": (buffer, offset, size, flags) -> LockResource(buffer, 0, 10, 0, +24 & ~3, 0, +24 & ~3, +28 masked, flags); the sprite batcher's lock
+D3DIndexBuffer_Lock                    8216FDF0  WORKLOG "Corruption": as VertexBuffer_Lock with type 12 and flags | 2, exactly as reNut's hook
 D3DResource_GetType                    8216EA00  map_B: low nibble of Common, type 3/4 cases
 D3D_UnlockResource                     8216EA90  map_A: common tail target of the Unlock functions
 D3DResource_AddRef                     8216ECF8  map_B: atomic +1 of +4, parent AddRef for levels
