@@ -1,0 +1,1 @@
+f470:start,f710:a,f1050:left,f1200:left,f1400:a,f2050:start,f2300:a,f2800:a,f3350:a,f3450:start,f3700:a,f4000:a,f4100:a,f4200-f40000:a*
