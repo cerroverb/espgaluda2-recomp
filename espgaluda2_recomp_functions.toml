@@ -1,0 +1,254 @@
+[functions."0x8210E3F0"]
+name = "sub_8210E3F0"
+
+[functions."0x820B0B30"]
+name = "sub_820B0B30"
+
+[functions."0x82094910"]
+name = "sub_82094910"
+
+[functions."0x82094920"]
+name = "sub_82094920"
+
+[functions."0x82095718"]
+name = "sub_82095718"
+
+[functions."0x82095720"]
+name = "sub_82095720"
+
+[functions."0x82095728"]
+name = "sub_82095728"
+
+[functions."0x82095E78"]
+name = "sub_82095E78"
+
+[functions."0x820B1168"]
+name = "sub_820B1168"
+
+[functions."0x822A8448"]
+name = "sub_822A8448"
+end = 0x822A84D0
+
+# Thunks reached only through lis/addi address constants (verified code, see codeptr_review.txt).
+
+[functions."0x82091690"]
+name = "sub_82091690"
+end = 0x820916A0
+
+[functions."0x820916B0"]
+name = "sub_820916B0"
+end = 0x820916C0
+
+[functions."0x820916D8"]
+name = "sub_820916D8"
+end = 0x820916E4
+
+[functions."0x820917A8"]
+name = "sub_820917A8"
+end = 0x820917BC
+
+[functions."0x82092190"]
+name = "sub_82092190"
+end = 0x820921A4
+
+[functions."0x820923E0"]
+name = "sub_820923E0"
+end = 0x820923EC
+
+[functions."0x82093900"]
+name = "sub_82093900"
+end = 0x8209391C
+
+[functions."0x8209A930"]
+name = "sub_8209A930"
+end = 0x8209A93C
+
+[functions."0x8209A9E8"]
+name = "sub_8209A9E8"
+end = 0x8209A9F8
+
+[functions."0x8209A9F8"]
+name = "sub_8209A9F8"
+end = 0x8209AA04
+
+[functions."0x821F93D0"]
+name = "sub_821F93D0"
+end = 0x821F93E0
+
+[functions."0x821F93E0"]
+name = "sub_821F93E0"
+end = 0x821F93F0
+
+[functions."0x821F93F0"]
+name = "sub_821F93F0"
+end = 0x821F9400
+
+[functions."0x821F9400"]
+name = "sub_821F9400"
+end = 0x821F9410
+
+[functions."0x821F9410"]
+name = "sub_821F9410"
+end = 0x821F9420
+
+[functions."0x821F9420"]
+name = "sub_821F9420"
+end = 0x821F9430
+
+[functions."0x821F9430"]
+name = "sub_821F9430"
+end = 0x821F9440
+
+[functions."0x821F9440"]
+name = "sub_821F9440"
+end = 0x821F9450
+
+[functions."0x821F9450"]
+name = "sub_821F9450"
+end = 0x821F9460
+
+[functions."0x82272908"]
+name = "sub_82272908"
+end = 0x8227290C
+
+# this-adjusting / vcall thunks reached only through vtables in .rdata (see dataptr_scan.txt).
+
+[functions."0x82111A68"]
+name = "sub_82111A68"
+end = 0x82111A70
+
+[functions."0x82111A78"]
+name = "sub_82111A78"
+end = 0x82111A80
+
+[functions."0x82116190"]
+name = "sub_82116190"
+end = 0x82116198
+
+[functions."0x82116198"]
+name = "sub_82116198"
+end = 0x821161A0
+
+[functions."0x821161A0"]
+name = "sub_821161A0"
+end = 0x821161A8
+
+[functions."0x821161B0"]
+name = "sub_821161B0"
+end = 0x821161B8
+
+[functions."0x821161B8"]
+name = "sub_821161B8"
+end = 0x821161C0
+
+[functions."0x821161C0"]
+name = "sub_821161C0"
+end = 0x821161C8
+
+[functions."0x82116440"]
+name = "sub_82116440"
+end = 0x82116448
+
+[functions."0x82116448"]
+name = "sub_82116448"
+end = 0x82116450
+
+[functions."0x82116458"]
+name = "sub_82116458"
+end = 0x82116460
+
+[functions."0x82116460"]
+name = "sub_82116460"
+end = 0x82116468
+
+[functions."0x82116468"]
+name = "sub_82116468"
+end = 0x82116470
+
+[functions."0x82116470"]
+name = "sub_82116470"
+end = 0x82116478
+
+[functions."0x82116478"]
+name = "sub_82116478"
+end = 0x82116480
+
+[functions."0x82116480"]
+name = "sub_82116480"
+end = 0x82116488
+
+[functions."0x82116488"]
+name = "sub_82116488"
+end = 0x82116490
+
+[functions."0x82116AC8"]
+name = "sub_82116AC8"
+end = 0x82116AE0
+
+[functions."0x82117708"]
+name = "sub_82117708"
+end = 0x82117710
+
+[functions."0x82118450"]
+name = "sub_82118450"
+end = 0x82118458
+
+[functions."0x8211B1E8"]
+name = "sub_8211B1E8"
+end = 0x8211B214
+
+[functions."0x8211B478"]
+name = "sub_8211B478"
+end = 0x8211B480
+
+[functions."0x8212A218"]
+name = "sub_8212A218"
+end = 0x8212A220
+
+[functions."0x821E19A8"]
+name = "sub_821E19A8"
+end = 0x821E19B0
+
+[functions."0x821F8DF0"]
+name = "sub_821F8DF0"
+end = 0x821F8E00
+
+[functions."0x821F8EF8"]
+name = "sub_821F8EF8"
+end = 0x821F8F20
+
+[functions."0x821F8F20"]
+name = "sub_821F8F20"
+end = 0x821F8F48
+
+[functions."0x821F8F48"]
+name = "sub_821F8F48"
+end = 0x821F8F70
+
+[functions."0x821F8F70"]
+name = "sub_821F8F70"
+end = 0x821F8F98
+
+[functions."0x821F9398"]
+name = "sub_821F9398"
+end = 0x821F93B8
+
+[functions."0x821F93B8"]
+name = "sub_821F93B8"
+end = 0x821F93BC
+
+[functions."0x82329380"]
+name = "sub_82329380"
+end = 0x823293B8
+
+[functions."0x823293D0"]
+name = "sub_823293D0"
+end = 0x823293E8
+
+[functions."0x82359168"]
+name = "sub_82359168"
+end = 0x82359178
+
+[functions."0x82363528"]
+name = "sub_82363528"
+end = 0x82363554

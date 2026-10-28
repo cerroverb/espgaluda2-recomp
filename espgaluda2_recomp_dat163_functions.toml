@@ -1,0 +1,4 @@
+# Thunk reached only through a lis/addi callback pointer (mr r4,r5; li r5,0; b).
+[functions."0x880EEB00"]
+name = "sub_880EEB00"
+end = 0x880EEB0C
