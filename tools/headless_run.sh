@@ -21,7 +21,7 @@ stop_game
 # A fresh profile each run (the game saves its last menu choices in its system data, which made scripted menu
 # navigation differ from run to run); the shader and pipeline caches stay. HEADLESS_KEEP_SAVE=1 keeps it.
 [ "${HEADLESS_KEEP_SAVE:-0}" = 1 ] || rm -rf user_data/B13EBABEBABEBABE
-setsid gamescope --backend headless -W 1280 -H 720 -w 1280 -h 720 -r 60 -- ./espgaluda2_recomp "$@" \
+setsid gamescope --backend headless -W 1280 -H 720 -w 1280 -h 720 -r ${GS_HZ:-60} ${GS_ARGS:-} -- ./espgaluda2_recomp "$@" \
   > "${prefix}_gamescope.log" 2>&1 &
 export GAMESCOPE_WAYLAND_DISPLAY=gamescope-0
 start=$(date +%s.%N)
