@@ -31,3 +31,14 @@ The same settings work as launch options or in the file, for example:
 or in espgaluda2_recomp.toml:
   renut_resolution = "1440p"
   fullscreen = true
+
+Graphics card (laptops with two GPUs)
+-------------------------------------
+The game uses a dedicated GPU if there is one, else the built-in one. The log
+(logs/ next to the game) lists every GPU on a line starting "GPUs:" and the one
+in use on "Renderer: Vulkan on ...". To pick another one, copy its name from
+that line exactly:
+  ./espgaluda2-recomp.sh --espgaluda2_gpu="NAME FROM THE LOG"
+(or espgaluda2_gpu = "NAME" in espgaluda2_recomp.toml; restart to apply).
+The older emulated renderer (--espgaluda2_renderer=xenos) uses
+--vulkan_device=N instead (N = 0, 1, ... in the order Vulkan lists them).

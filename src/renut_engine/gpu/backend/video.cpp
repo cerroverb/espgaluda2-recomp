@@ -39,6 +39,12 @@
 #include "renut_engine/gpu/banjo_renut_record.h"  // banjo-nx (package 28b): banjo_renut_record_worker
 #include <rex/cvar.h>
 #include <rex/frame_latency.h>  // banjo-nx (2026-10-20): the latency probe's "input -> GPU done"
+
+// espgaluda2-recomp: UnleashedRecomp's GraphicsDevice (see Video's device creation).
+REXCVAR_DEFINE_STRING(espgaluda2_gpu, "", "Espgaluda2",
+                      "Native renderer: the GPU to use, by the name the log lists under \"GPUs:\" (empty: a "
+                      "discrete GPU before an integrated one). The emulated renderer uses vulkan_device (an index)")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 #if defined(PLUME_DEKO3D)
 #include <plume_deko3d.h>  // banjo-nx (2026-10-20, banjo_deko3d_latency_trim): fence copies
 #endif
@@ -900,7 +906,20 @@ bool Video::CreateHostDevice() {
     RGPU_ERROR("{} render interface creation failed", BackendName(ActiveBackend()));
     return false;
   }
-  s.device = s.render_interface->createDevice();
+  // espgaluda2-recomp: the GPU by name, as UnleashedRecomp's GraphicsDevice option (github.com/hedge-dev/UnleashedRecomp
+  // cf829a9, UnleashedRecomp/user/config_def.h, gpu/video.cpp createDevice(Config::GraphicsDevice), and its list of
+  // getDeviceNames()). An empty or unknown name leaves plume's choice: a discrete GPU before an integrated one.
+  {
+    const std::string wanted = REXCVAR_GET(espgaluda2_gpu);
+    std::string names;
+    for (const std::string &name : s.render_interface->getDeviceNames())
+      names += (names.empty() ? "\"" : ", \"") + name + "\"";
+    RGPU_INFO("GPUs: {} (espgaluda2_gpu = \"{}\"{})", names.empty() ? std::string("none listed") : names, wanted,
+              wanted.empty() ? ": a discrete GPU first" : "");
+    s.device = s.render_interface->createDevice(wanted);
+    if (s.device && !wanted.empty() && s.device->getDescription().name != wanted)
+      RGPU_WARN("espgaluda2_gpu: no GPU named \"{}\"; using \"{}\"", wanted, s.device->getDescription().name);
+  }
   if (!s.device) {
     RGPU_ERROR("{} device creation failed", BackendName(ActiveBackend()));
     return false;
