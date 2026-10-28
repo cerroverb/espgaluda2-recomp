@@ -42,3 +42,10 @@ that line exactly:
 (or espgaluda2_gpu = "NAME" in espgaluda2_recomp.toml; restart to apply).
 The older emulated renderer (--espgaluda2_renderer=xenos) uses
 --vulkan_device=N instead (N = 0, 1, ... in the order Vulkan lists them).
+
+Checking the game's speed
+-------------------------
+--espgaluda2_rate_counter=true (or switch it in F4) writes a line to the log
+every second: game updates, guest vblanks and presents a second, and the
+display's refresh rate. The game should show 60 updates a second on any
+display (also at 120 or 144 Hz).
