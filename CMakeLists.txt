@@ -32,6 +32,19 @@ if(NOT REXSDK_DIR)
         "Path to rexglue-sdk source tree" FORCE)
 endif()
 
+# FetchContent runs its patch step only when it populates the tree, and once REXSDK_DIR is cached it is not reached
+# at all: a tree fetched before a patch was added keeps missing it. The patch script skips patches already applied,
+# so it runs on every configure, on the SDOJ tree that holds the SDK (not on a tree passed with -DREXSDK_DIR).
+get_filename_component(_sdoj_root "${REXSDK_DIR}/../.." ABSOLUTE)
+if(EXISTS "${_sdoj_root}/.git" AND EXISTS "${_sdoj_root}/thirdparty/rexglue-sdk")
+    execute_process(COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/sdk-patches
+                            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patches.cmake
+                    WORKING_DIRECTORY "${_sdoj_root}" RESULT_VARIABLE _patch_result)
+    if(NOT _patch_result EQUAL 0)
+        message(FATAL_ERROR "Applying sdk-patches failed")
+    endif()
+endif()
+
 include(generated/rexglue.cmake)
 
 # extract-xiso, run on first launch to extract an ISO into game_data.
