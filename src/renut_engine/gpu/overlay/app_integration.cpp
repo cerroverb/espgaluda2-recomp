@@ -85,7 +85,7 @@ OverlayPump g_pump;
 
 void ConfigureRuntime(rex::RuntimeConfig &config) {
   config.graphics = nullptr;
-  config.gpu_plugin.clear();
+  // espgaluda2-recomp: ReXGlue 0.8.0 has no GPU plugins (config.gpu_plugin); a null graphics system is enough.
 }
 
 std::unique_ptr<rex::ui::ImmediateDrawer> CreateOverlayDrawer() {

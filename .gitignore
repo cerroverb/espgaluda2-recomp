@@ -25,3 +25,4 @@
 *.iso
 *.log
 *.bak*
+__pycache__/
