@@ -1,11 +1,42 @@
 # Espgaluda II Black Label Recomp
 
-A native Linux x86-64 port of the Xbox 360 version of Espgaluda II Black Label,
+A Linux x86-64 port of the Xbox 360 version of Espgaluda II Black Label,
 statically recompiled with [ReXGlue](https://github.com/rexglue/rexglue-sdk).
 It builds on the SDK copy bundled in
 [SDOJ-Recomp](https://github.com/eandis/SDOJ-Recomp).
 
 No game data is included. You need your own dump of the game.
+
+## FAQ
+
+### Is this a native port?
+
+Partly. The game's PowerPC code is recompiled ahead of time into C++ and runs
+natively on x86-64, including `default.xex` and the seven `dat*.xex` modules.
+There is no CPU emulation or JIT. Graphics and audio are not native yet.
+
+### What is still emulated?
+
+The game still drives an emulated Xbox 360 GPU. ReXGlue's Xenia-derived Vulkan
+backend handles the Xenos command stream and EDRAM, and translates the game's
+shaders at runtime. Audio goes through emulated XMA decoding, and the Xbox kernel
+and XAM calls are Xenia's high-level implementations.
+
+### Will graphics and audio become native?
+
+That is where I want this to go, and for now I see the project as a base to build
+that on. It means replacing the GPU emulation with a renderer that takes over at
+the game's Direct3D calls.
+[Unleashed Recompiled](https://github.com/hedge-dev/UnleashedRecomp) and
+[Re:Blue](https://github.com/zolaware/reblue) (Blue Dragon) have their own native
+renderers, and [futari-nx](https://github.com/ChanseyIsTheBest/futari-nx) does it
+for Mushihimesama Futari, another CAVE game, with reNut's Direct3D-level renderer.
+
+### Can this help with other CAVE games?
+
+I hope so. It could be a starting point for other CAVE games on the Xbox 360,
+alongside [SDOJ-Recomp](https://github.com/eandis/SDOJ-Recomp). How much code
+those games share with this one still needs checking.
 
 ## Status
 
