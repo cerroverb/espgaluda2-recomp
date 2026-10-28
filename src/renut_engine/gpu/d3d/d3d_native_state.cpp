@@ -730,8 +730,8 @@ constexpr SamplerStateFn kSamplerStateFns[kSamplerStates] = {
 
 // The state tables: {getter, setter, default} per state. futari-nx: Futari's (D3D_InitializeApiState sub_820AAF68
 // reads them; N&B's 0x82E506F0 / 0x82E50BD0), 101 render and 20 sampler states as N&B's.
-constexpr u32 kRenderStateTable = 0x821E14F0;
-constexpr u32 kSamplerStateTable = 0x821E19B0;
+constexpr u32 kRenderStateTable = 0x82911270;  // espgaluda2-recomp: Futari 0x821E14F0; map_B (101 entries)
+constexpr u32 kSamplerStateTable = 0x82911730;  // espgaluda2-recomp: Futari 0x821E19B0; map_B (20 entries)
 constexpr u32 kTextureSamplers = 26;
 
 u32 TableWord(u32 table, u32 index, u32 field) {
@@ -1365,7 +1365,7 @@ namespace {
 
 // Per D3DFORMAT (low 6 bits) its format description; 0xF00 marks a float
 // depth format (word_820052F8).
-constexpr u32 kFormatTable = 0x82003430;  // futari-nx: Futari's (FindTextureSize sub_8209B980; N&B's 0x820052F8)
+constexpr u32 kFormatTable = 0x820364C8;  // espgaluda2-recomp: Futari 0x82003430; map_A/map_B (futari-nx: Futari's (FindTextureSize sub_8209B980; N&B's 0x820052F8))
 // The register packets between RB_COPY_CONTROL and RB_COPY_DEST_INFO.
 constexpr u32 kCopyControl = 0x2A18;
 constexpr u32 kCopyDestInfo = 0x2A24;

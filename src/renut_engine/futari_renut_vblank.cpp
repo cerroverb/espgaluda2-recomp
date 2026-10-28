@@ -72,9 +72,9 @@ REXCVAR_DEFINE_INT32(futari_renut_vblank_core, 2, "Futari/Renut",
 namespace futari::renut_vblank {
 namespace {
 
-constexpr uint32_t kVblankHandler = 0x820A4C08u;  // Direct3D's vblank handler (device)
+constexpr uint32_t kVblankHandler = 0x82170540u;  // espgaluda2-recomp: Futari 0x820A4C08; docs/d3d/map_B.txt D3D_VblankHandler  // Direct3D's vblank handler (device)
 constexpr uint32_t kVblankHandlerWords = 69;
-constexpr uint64_t kVblankHandlerHash = 0x49BA3A1B1EAA1B6Eull;
+constexpr uint64_t kVblankHandlerHash = 0x445040661D41D87Full;  // espgaluda2-recomp: FNV-1a of sub_82170540 (69 words) in the decrypted default.xex image; Futari 0x49BA3A1B1EAA1B6E
 #if REX_PLATFORM_SWITCH
 constexpr int kVblankThreadPriority = 0x2C;  // the render thread's (banjo_renut_tuning.cpp kRenderThreadPriority)
 #endif
