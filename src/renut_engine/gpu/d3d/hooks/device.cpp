@@ -910,6 +910,11 @@ void WaitForPresentationInterval(const u8 *device) {
     return;
   const u32 interval = u32(*reinterpret_cast<const be_u32 *>(device + kDeviceOffsetPresentInterval));
   const uint32_t per_flip = VblanksPerFlip(interval);
+  static u32 logged_interval = 0xFFFFFFFFu;  // the game's presentation interval, logged when it changes
+  if (interval != logged_interval) {
+    logged_interval = interval;
+    RGPU_INFO("[renut] presentation interval {:#x}: {} guest vblank(s) a flip", interval, per_flip);
+  }
   if (!per_flip)
     return;
   const uint64_t now = futari::renut_vblank::Count();
