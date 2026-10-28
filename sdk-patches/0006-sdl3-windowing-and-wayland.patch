@@ -877,27 +877,6 @@ index 09b20f72..00000000
 -
 -}  // namespace ui
 -}  // namespace rex
-diff --git a/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp b/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
-index 61d48b94..fd26acb5 100644
---- a/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
-+++ b/thirdparty/rexglue-sdk/src/graphics/graphics_system.cpp
-@@ -287,6 +287,16 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
-         DisplayVblankLock display_lock(1000.0 / refresh_rate_hz);
-         const double ticks_per_ms = double(guest_tick_frequency) / 1000.0;
-         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
-+        // espgaluda2-recomp (sdk-patches/0005, original code): with vblank_per_swap (sdk-patches/0003) one guest
-+        // vblank per Swap, as Renut's vblank thread does, so both renderers advance the game the same way and runs
-+        // can be compared frame by frame.
-+        if (kernel::xboxkrnl::VblankPerSwap()) {
-+          uint64_t last_swap = kernel::xboxkrnl::GuestSwapCount();
-+          while (vsync_worker_running_) {
-+            if (kernel::xboxkrnl::WaitSwapForVblank(last_swap, vsync_worker_running_)) MarkVblank();
-+          }
-+          return 0;
-+        }
-         while (vsync_worker_running_) {
-           {
-             // Positive delays the next vblank, negative brings it forward.
 diff --git a/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt b/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
 index ad500291..a05deb6b 100644
 --- a/thirdparty/rexglue-sdk/src/ui/CMakeLists.txt
