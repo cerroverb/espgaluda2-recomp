@@ -78,6 +78,11 @@ target_include_directories(espgaluda2_renut_gpu PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${REXGLUE_ENTRYPOINT_INCLUDE_DIR}")
 target_compile_definitions(espgaluda2_renut_gpu PRIVATE FUTARI_RENUT_RENDERER=1)
+# ReXGlue 0.8.0's Linux window is GTK: the renderer takes its surface from it (gpu/backend/native_window.cpp).
+target_compile_definitions(espgaluda2_renut_gpu PRIVATE ESPGALUDA2_GTK_WINDOW=1)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ESPGALUDA2_GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+target_link_libraries(espgaluda2_renut_gpu PRIVATE PkgConfig::ESPGALUDA2_GTK3)
 target_link_libraries(espgaluda2_renut_gpu PRIVATE rex::runtime)
 renut_gpu_setup(espgaluda2_renut_gpu)
 target_link_libraries(espgaluda2_recomp PRIVATE espgaluda2_renut_gpu)

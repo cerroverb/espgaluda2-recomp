@@ -169,6 +169,7 @@ extern "C" void futari_renut_entry_D3DDevice_RunCommandBuffer(PPCContext& ctx, u
 extern "C" void futari_renut_entry_D3DDevice_SetClipPlane(PPCContext& ctx, uint8_t* base);
 extern "C" void futari_renut_entry_D3DDevice_SetCommandBufferPredication(PPCContext& ctx, uint8_t* base);
 extern "C" void futari_renut_entry_D3DDevice_SetDepthStencilSurface(PPCContext& ctx, uint8_t* base);
+extern "C" void futari_renut_entry_D3DDevice_SetFVF(PPCContext& ctx, uint8_t* base);
 extern "C" void futari_renut_entry_D3DDevice_SetGammaRamp(PPCContext& ctx, uint8_t* base);
 extern "C" void futari_renut_entry_D3DDevice_SetIndices(PPCContext& ctx, uint8_t* base);
 extern "C" void futari_renut_entry_D3DDevice_SetPWLGamma(PPCContext& ctx, uint8_t* base);
@@ -403,12 +404,7 @@ extern "C" void futari_renut_entry_XGRegisterVertexShader(PPCContext& ctx, uint8
     __imp__sub_82165FF8(ctx, base); \
   }
 #define FUTARI_RENUT_SITE_D3DDevice_CreateIndexBuffer  // not in Espgaluda II's Direct3D (or not confirmed)
-#define FUTARI_RENUT_SITE_D3DDevice_CreatePixelShader \
-  REX_EXTERN(__imp__sub_82169D88); \
-  extern "C" REX_FUNC(sub_82169D88) { \
-    if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DDevice_CreatePixelShader(ctx, base); return; } \
-    __imp__sub_82169D88(ctx, base); \
-  }
+#define FUTARI_RENUT_SITE_D3DDevice_CreatePixelShader  // not in Espgaluda II's Direct3D (or not confirmed)
 #define FUTARI_RENUT_SITE_D3DDevice_CreateSurface \
   REX_EXTERN(__imp__sub_82164B58); \
   extern "C" REX_FUNC(sub_82164B58) { \
@@ -428,12 +424,7 @@ extern "C" void futari_renut_entry_XGRegisterVertexShader(PPCContext& ctx, uint8
     if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DDevice_CreateVertexDeclaration(ctx, base); return; } \
     __imp__sub_82168790(ctx, base); \
   }
-#define FUTARI_RENUT_SITE_D3DDevice_CreateVertexShader \
-  REX_EXTERN(__imp__sub_82169F70); \
-  extern "C" REX_FUNC(sub_82169F70) { \
-    if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DDevice_CreateVertexShader(ctx, base); return; } \
-    __imp__sub_82169F70(ctx, base); \
-  }
+#define FUTARI_RENUT_SITE_D3DDevice_CreateVertexShader  // not in Espgaluda II's Direct3D (or not confirmed)
 #define FUTARI_RENUT_SITE_D3DDevice_DrawIndexedTessellatedVertices  // not in Espgaluda II's Direct3D (or not confirmed)
 #define FUTARI_RENUT_SITE_D3DDevice_DrawIndexedVertices \
   REX_EXTERN(__imp__sub_821661E0); \
@@ -614,6 +605,12 @@ extern "C" void futari_renut_entry_XGRegisterVertexShader(PPCContext& ctx, uint8
   extern "C" REX_FUNC(sub_82162D48) { \
     if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DDevice_SetDepthStencilSurface(ctx, base); return; } \
     __imp__sub_82162D48(ctx, base); \
+  }
+#define FUTARI_RENUT_SITE_D3DDevice_SetFVF \
+  REX_EXTERN(__imp__sub_8216A060); \
+  extern "C" REX_FUNC(sub_8216A060) { \
+    if (::banjo::renut_gpu::Active()) { futari_renut_entry_D3DDevice_SetFVF(ctx, base); return; } \
+    __imp__sub_8216A060(ctx, base); \
   }
 #define FUTARI_RENUT_SITE_D3DDevice_SetGammaRamp  // not in Espgaluda II's Direct3D (or not confirmed)
 #define FUTARI_RENUT_SITE_D3DDevice_SetIndices \

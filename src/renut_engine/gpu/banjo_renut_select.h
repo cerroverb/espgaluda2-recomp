@@ -35,9 +35,12 @@ inline bool Active() {
 
 // Renut's hook of the Direct3D function `name`: its entry (for the default.xex site, a yielding Futari hook and the
 // cores' forwarding), then the site.
+// espgaluda2-recomp: Espgaluda2DebugHeapCheck (src/debug_xmem_trace.cpp, --espgaluda2_debug_xmem) after each entry.
+extern "C" void Espgaluda2DebugHeapCheck(const char* where, uint8_t* base);
 #define FUTARI_RENUT_HOOK(name, function)                                              \
   extern "C" void futari_renut_entry_##name(PPCContext& ctx, uint8_t* base) {          \
     ::rex::ppc::HostToGuestFunction<function>(ctx, base);                              \
+    Espgaluda2DebugHeapCheck(#name, base);                                             \
   }                                                                                    \
   FUTARI_RENUT_SITE_##name
 
@@ -46,6 +49,7 @@ inline bool Active() {
   static void futari_renut_raw_##name(PPCContext& ctx, uint8_t* base);                 \
   extern "C" void futari_renut_entry_##name(PPCContext& ctx, uint8_t* base) {          \
     futari_renut_raw_##name(ctx, base);                                                \
+    Espgaluda2DebugHeapCheck(#name, base);                                             \
   }                                                                                    \
   FUTARI_RENUT_SITE_##name                                                             \
   static void futari_renut_raw_##name([[maybe_unused]] PPCContext& __restrict ctx, uint8_t* base)
