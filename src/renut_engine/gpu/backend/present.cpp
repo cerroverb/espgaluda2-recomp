@@ -70,6 +70,13 @@ REXCVAR_DEFINE_BOOL(renut_vsync, false, "Nuts&Bolts/Graphics",
                     "the refresh rate (frame_cap then only limits below it). Off shows frames at "
                     "once, with tearing.");
 
+// espgaluda2-recomp (2026-10-29): see FitFrame.
+REXCVAR_DEFINE_BOOL(futari_fill_crop, false, "Nuts&Bolts/Graphics",
+                    "On a screen narrower than 16:9 (16:10, 4:3): on, the picture fills the height and up to 15 % of its "
+                    "width is trimmed from the sides, which hold only the wallpaper (bars past that); off, the whole "
+                    "picture with letterbox bars. The play field and the top and bottom are never trimmed. Never "
+                    "stretched.");
+
 namespace renut::gpu {
 
 namespace {
@@ -107,6 +114,10 @@ void RebuildSwapChain(VideoState &s) {
   }
 }
 
+// espgaluda2-recomp (2026-10-29): futari-nx's limit of the trim (futari_fill_crop below).
+constexpr float kMaxTrim = 0.15f;
+
+
 struct FrameFit {
   plume::RenderViewport viewport;
   float visible[2] = {1.0f, 1.0f};  // the share of the frame shown on each axis
@@ -122,6 +133,26 @@ FrameFit FitFrame(uint32_t out_w, uint32_t out_h, uint32_t src_w, uint32_t src_h
   fit.viewport = plume::RenderViewport(0.0f, 0.0f, float(out_w), float(out_h));
   if (src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0)
     return fit;
+  if (REXCVAR_GET(futari_fill_crop)) {
+    // espgaluda2-recomp (2026-10-29, owner's request): futari-nx's fill-and-trim, restored from this file before d3a8c9a
+    // (github.com/ChanseyIsTheBest/futari-nx PR 2, app/src/renut_engine/gpu/backend/present.cpp FitFrame, kMaxTrim
+    // 0.15), as futari-linux has it (futari_fill_crop). Only the sides are trimmed: they hold the wallpaper, and the
+    // play field (480x640 at (400, 40) of 1280x720, docs/aspect-report.md) is never cut; a screen wider than 16:9 keeps
+    // the whole height with bars at the sides.
+    const float out_aspect = float(out_w) / float(out_h);
+    float src_aspect = float(src_w) / float(src_h);
+    if (src_aspect > out_aspect) {
+      fit.visible[0] = std::max(out_aspect / src_aspect, 1.0f - kMaxTrim);
+      src_aspect *= fit.visible[0];
+    }
+    float w = float(out_w), h = float(out_h);
+    if (src_aspect > out_aspect)
+      h = w / src_aspect;
+    else
+      w = h * src_aspect;
+    fit.viewport = plume::RenderViewport((float(out_w) - w) * 0.5f, (float(out_h) - h) * 0.5f, w, h);
+    return fit;
+  }
   auto rescale_unsigned = [](uint32_t value, uint32_t new_scale, uint32_t old_scale) -> uint32_t {
     return uint32_t((uint64_t(value) * new_scale + (old_scale >> 1)) / old_scale);
   };
@@ -150,9 +181,9 @@ void LogFrameFit(uint32_t out_w, uint32_t out_h, uint32_t src_w, uint32_t src_h,
   if (std::equal(std::begin(now), std::end(now), std::begin(last)))
     return;
   std::copy(std::begin(now), std::end(now), std::begin(last));
-  RGPU_INFO("Output {}x{}: the game's {}x{} image shown at {}x{} from ({}, {})", out_w, out_h,
-            src_w, src_h, uint32_t(fit.viewport.width), uint32_t(fit.viewport.height), uint32_t(fit.viewport.x),
-            uint32_t(fit.viewport.y));
+  RGPU_INFO("Output {}x{}: the game's {}x{} image shown at {}x{} from ({}, {}), {:.3f} of its width (futari_fill_crop {})",
+            out_w, out_h, src_w, src_h, uint32_t(fit.viewport.width), uint32_t(fit.viewport.height),
+            uint32_t(fit.viewport.x), uint32_t(fit.viewport.y), fit.visible[0], REXCVAR_GET(futari_fill_crop) ? "on" : "off");
 }
 
 // banjo-nx (2026-10-20, banjo_renut_game_gamma): the gamma ramp the game loads, which the 360's display applies to

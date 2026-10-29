@@ -1,20 +1,21 @@
 # Espgaluda II recomp: settings
 
-Every setting can be given as a launch option or written into the settings file next to the game:
+## The settings window
+
+Press **F4** in the game: a window lists every setting by category, with a search box at the top. Change a value,
+then press **Save to config**; it is written to `espgaluda2_recomp.toml` next to the game. Settings marked as needing a restart take
+effect at the next start. On a handheld without a keyboard (Steam Deck, X20), map a button to F4 in Steam Input.
+The window is the rexglue SDK's own (src/ui/overlay/settings_overlay.cpp).
+
+The same settings also work as launch options:
 
 ```sh
-./espgaluda2-recomp.sh --renut_resolution=1440p --renut_vsync=false
+./espgaluda2-recomp.sh --renut_resolution=1440p
 ```
 
-or in `espgaluda2_recomp.toml`:
-
-```toml
-renut_resolution = "1440p"
-renut_vsync = false
-```
-
-The names, types, defaults and descriptions below are copied by a script from the source code (`gen_settings.py` in ~/projects/provenance-check on the build machine),
-so they say exactly what the program does. Generated 2026-10-29.
+The names, types, defaults and descriptions below are copied by a script from the source code (`gen_settings.py`
+and `compose_settings.py` in ~/projects/provenance-check on the build machine), so they say exactly what
+the program does. Generated 2026-10-29.
 
 ## Settings for players
 
@@ -23,6 +24,7 @@ so they say exactly what the program does. Generated 2026-10-29.
 | `renut_resolution` | string | `"720p"` | Nuts&Bolts/Graphics | Internal render resolution, by its height: 480p, 720p (the game's own), 1080p, 1440p or 4K (2160 lines). Applies from the next frame. | `src/renut_engine/gpu/render/surfaces.cpp` |
 | `fullscreen` | bool | `true` | UI/Window | Start the window in fullscreen mode | SDK `src/ui/window.cpp` |
 | `renut_vsync` | bool | `false` | Nuts&Bolts/Graphics | Show each frame at the display's refresh: no tearing, and the game runs at the refresh rate (frame_cap then only limits below it). Off shows frames at once, with tearing. | `src/renut_engine/gpu/backend/present.cpp` |
+| `futari_fill_crop` | bool | `false` | Nuts&Bolts/Graphics | On a screen narrower than 16:9 (16:10, 4:3): on, the picture fills the height and up to 15 % of its width is trimmed from the sides, which hold only the wallpaper (bars past that); off, the whole picture with letterbox bars. The play field and the top and bottom are never trimmed. Never stretched. | `src/renut_engine/gpu/backend/present.cpp` |
 | `present_letterbox` | bool | `true` | UI/Presenter | Enable letterboxing for non-native aspect ratios | SDK `src/ui/presenter.cpp` |
 | `monitor` | int32 | `0` | UI/Window | Monitor index to display on (0 = default, 1 = primary, 2 = second monitor, etc.) | SDK `src/ui/window.cpp` |
 | `window_width` | int32 | `0` | UI/Window | Startup window width in logical pixels (0 = use app default) | SDK `src/ui/window.cpp` |
@@ -38,16 +40,18 @@ so they say exactly what the program does. Generated 2026-10-29.
 
 | Key binding | Default key | What it does (from the code) | Defined in |
 | --- | --- | --- | --- |
+| `bind_settings` | F4 | Toggle settings overlay | SDK `src/ui/rex_app.cpp` |
 | `bind_fullscreen` | F11 | Toggle fullscreen | `src/espgaluda2_recomp_app.h` |
 
 Notes (not from the code):
-- `present_letterbox`: the native renderer always shows the whole picture with bars and never stretches; the
+- `present_letterbox`: the native renderer always keeps the picture's shape (bars, or `futari_fill_crop`); the
   setting only changes the emulated renderer.
 - `video_driver`: empty lets SDL choose (Wayland on KDE Plasma 6.7, X11 under gamescope).
 
 ## Useful launch options
 
 - `--renut_resolution=1440p` for a 2560x1440 or 2560x1600 screen (fullscreen is the default).
+- `--futari_fill_crop=true` to fill a 16:10 screen; only the wallpaper at the sides is trimmed.
 - `--renut_vsync=true` to wait for the screen's refresh (no tearing, a little more input lag).
 - `--espgaluda2_rate_counter=true` to log the game's update rate once a second.
 - `--espgaluda2_renderer=xenos` for the emulated renderer, as a comparison.
@@ -213,6 +217,7 @@ the tested setting. The SDK's own options (window, input, logging, emulated GPU)
 | `renut_anisotropic_filtering` | string | `"Game"` | Futari/Renut | Anisotropic texture filtering: the game's own, or at least 2x, 4x, 8x or 16x. | `src/renut_engine/gpu/render/graphics_options.cpp` |
 | `renut_gpu_profile` | double | `0.0` | Nuts&Bolts/Debug | Every this many seconds, log the GPU's time per frame by kind of work (draws per target, resolves, mip levels, present). 0 = off. | `src/renut_engine/gpu/backend/gpu_profile.cpp` |
 | `renut_memory_report` | double | `30.0` | Nuts&Bolts/Debug | Seconds between memory reports in the log (process, GPU and the renderer's pools); 0 turns them off. | `src/renut_engine/gpu/backend/memory_report.cpp` |
+| `futari_fill_crop` | bool | `false` | Nuts&Bolts/Graphics | On a screen narrower than 16:9 (16:10, 4:3): on, the picture fills the height and up to 15 % of its width is trimmed from the sides, which hold only the wallpaper (bars past that); off, the whole picture with letterbox bars. The play field and the top and bottom are never trimmed. Never stretched. | `src/renut_engine/gpu/backend/present.cpp` |
 | `renut_gpu_backend` | string | `"d3d12"` | Nuts&Bolts/Graphics | Renderer backend: d3d12 or vulkan. Takes effect after a restart. Non-Windows builds always use vulkan. banjo-nx: deko3d on the Switch, plume's deko3d back end (docs/deko3d-renderer.md); elsewhere it means vulkan. | `src/renut_engine/gpu/backend/backend.cpp` |
 | `renut_gpu_dred` | bool | `false` | Nuts&Bolts/Graphics | D3D12 device removed diagnostics (DRED breadcrumbs and page faults) for debugging GPU crashes. Costs CPU and GPU time on every command. Takes effect after a restart. | `src/renut_engine/gpu/backend/backend.cpp` |
 | `renut_pipeline_list` | string | `"pipeline_list.bin"` | Nuts&Bolts/Graphics | The pipelines the renderer has built, which it builds ahead of use at the next start (delete it to start over) | `src/renut_engine/gpu/render/pipeline.cpp` |

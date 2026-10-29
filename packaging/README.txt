@@ -14,7 +14,8 @@ Display settings
 ----------------
 F4 opens the settings (type a name into the search box at the top, e.g.
 "resolution"); "Save to config" keeps them in espgaluda2_recomp.toml next to
-the game. F11 switches fullscreen on and off.
+the game. F11 switches fullscreen on and off. On a handheld without a keyboard,
+map a button to F4 in Steam Input. The most useful settings:
 
   renut_resolution    Internal resolution: 480p, 720p (the game's own,
                       default), 1080p, 1440p or 4K. Applies at once.
@@ -26,6 +27,9 @@ the game. F11 switches fullscreen on and off.
                       screen is not 16:9. The native renderer always keeps
                       the picture's shape; false stretches it only with
                       the emulated renderer (espgaluda2_renderer=xenos).
+  futari_fill_crop    false (default): bars on a 16:10 or 4:3 screen. true:
+                      fills the screen, trimming only the wallpaper at the
+                      sides; the play field is never cut.
   renut_vsync         false (default): no vsync, the least lag, tearing
                       possible. true: waits for the screen's refresh.
 
