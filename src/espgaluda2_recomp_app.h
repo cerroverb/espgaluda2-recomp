@@ -10,12 +10,17 @@
 #include <rex/filesystem.h>
 #include <rex/rex_app.h>
 #include <rex/system.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/user_module.h>
+#include <rex/system/xthread.h>
 #include <rex/ui/keybinds.h>
 #include <rex/ui/window.h>
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <vector>
 
 #include "exit_guard.h"
 #include "futari_capture.h"
@@ -118,6 +123,17 @@ class Espgaluda2RecompApp : public rex::ReXApp {
 
   // futari-nx futari_app.h OnPostSetup: the scripted pad, the recorder and Renut's vblank thread.
   void OnPostSetup() override {
+#if defined(__linux__)
+    // espgaluda2-recomp (2026-10-29, as futari-linux a1f2241, after UnleashedRecomp ui/game_window.cpp SetTitle): the
+    // window's name is the app id the taskbar groups by (src/main.cpp).
+    if (rex::ui::Window* w = window()) {
+#if defined(__aarch64__)
+      w->SetTitle("espgaluda2-recomp-aarch64");
+#else
+      w->SetTitle("espgaluda2-recomp-x86_64");
+#endif
+    }
+#endif
     espgaluda2::exit_guard::InstallX11IoErrorHandler();  // original code, src/exit_guard.h
     // UnleashedRecomp ui/game_window.cpp (github.com/hedge-dev/UnleashedRecomp cf829a9) toggles fullscreen on Alt+Enter
     // and stores it in its Fullscreen config; the same here through the SDK's keybinds, which take single keys: F11,
@@ -161,6 +177,28 @@ class Espgaluda2RecompApp : public rex::ReXApp {
         },
         {});
   }
+
+#if defined(__linux__)
+  // espgaluda2-recomp (2026-10-29): the window icon is the game's own title image from its XDBF, as Xenia sets it once
+  // the title is launched (github.com/xenia-project/xenia, src/xenia/emulator.cpp Emulator::CompleteLaunch:
+  // `auto icon_block = db.icon(); ... display_window_->SetIcon(icon_block.buffer, icon_block.size)`); no art in the
+  // repository. The image is a PNG, which the SDK's SDL window takes (sdk-patches/0008).
+  void OnPostLaunchModule(rex::system::XThread* thread) override {
+    rex::ReXApp::OnPostLaunchModule(thread);
+    auto* kernel = runtime() ? runtime()->kernel_state() : nullptr;
+    if (!kernel || !kernel->GetExecutableModule()) return;
+    const auto icon = kernel->title_xdbf().icon();
+    if (!icon || !icon.size) {
+      REXLOG_INFO("window icon: the title has no XDBF image");
+      return;
+    }
+    auto bytes = std::make_shared<std::vector<uint8_t>>(icon.buffer, icon.buffer + icon.size);
+    app_context().CallInUIThread([this, bytes] {
+      if (rex::ui::Window* w = window()) w->SetIcon(bytes->data(), bytes->size());
+    });
+    REXLOG_INFO("window icon: the title's XDBF image, {} bytes", bytes->size());
+  }
+#endif
 
   void OnShutdown() override {
     espgaluda2::exit_guard::ArmExitWatchdog();  // original code, src/exit_guard.h
