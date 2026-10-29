@@ -180,14 +180,19 @@ class Espgaluda2RecompApp : public rex::ReXApp {
 
 #if defined(__linux__)
   // espgaluda2-recomp (2026-10-29): the window icon is the game's own title image from its XDBF, as Xenia sets it once
-  // the title is launched (github.com/xenia-project/xenia, src/xenia/emulator.cpp Emulator::CompleteLaunch:
+  // the title is launched (github.com/xenia-project/xenia, src/xenia/emulator.cc Emulator::CompleteLaunch, after its db.is_valid() check:
   // `auto icon_block = db.icon(); ... display_window_->SetIcon(icon_block.buffer, icon_block.size)`); no art in the
   // repository. The image is a PNG, which the SDK's SDL window takes (sdk-patches/0008).
   void OnPostLaunchModule(rex::system::XThread* thread) override {
     rex::ReXApp::OnPostLaunchModule(thread);
     auto* kernel = runtime() ? runtime()->kernel_state() : nullptr;
     if (!kernel || !kernel->GetExecutableModule()) return;
-    const auto icon = kernel->title_xdbf().icon();
+    const auto db = kernel->title_xdbf();
+    if (!db.is_valid()) {  // Xenia checks this before db.icon() (found missing by an independent review)
+      REXLOG_INFO("window icon: the title has no XDBF data");
+      return;
+    }
+    const auto icon = db.icon();
     if (!icon || !icon.size) {
       REXLOG_INFO("window icon: the title has no XDBF image");
       return;
