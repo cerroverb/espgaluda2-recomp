@@ -26,7 +26,8 @@ the game. F11 switches fullscreen on and off.
                       screen is not 16:9. The native renderer always keeps
                       the picture's shape; false stretches it only with
                       the emulated renderer (espgaluda2_renderer=xenos).
-  renut_vsync         true (default). false: no vsync (less lag, tearing).
+  renut_vsync         false (default): no vsync, the least lag, tearing
+                      possible. true: waits for the screen's refresh.
 
 The same settings work as launch options or in the file, for example:
   ./espgaluda2-recomp.sh --renut_resolution=1440p --fullscreen=true
