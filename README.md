@@ -55,8 +55,7 @@ timing cannot be followed (for example through Xwayland under a desktop composit
 
 ### Will audio become native?
 
-Audio still uses the SDK's XMA decoding: the game streams its music through the Xbox 360's XMA decoder, which the SDK
-reproduces (the decoding itself is FFmpeg's), and no existing project shows a native replacement yet.
+No existing project shows a native replacement yet that I could find, but let me know if one exists.
 
 ### Can this help with other CAVE games?
 
