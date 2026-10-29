@@ -96,8 +96,8 @@ those games share with this one still needs checking.
 1. Download `espgaluda2-recomp-linux-amd64.tar.gz` from Releases and unpack it.
 2. Add the game, one of two ways:
    - **ISO:** put the `.iso` next to `espgaluda2-recomp.sh`. The first launch
-     extracts it into `game_data` (takes a few seconds), after which the ISO
-     can be deleted.
+     extracts it into `game_data` (a progress window shows while it runs),
+     after which the ISO can be deleted.
    - **Extracted files:** copy them into `game_data`, or make `game_data` a
      symlink to the folder.
 3. Run `espgaluda2-recomp.sh`. For Steam, add it as a non-Steam game.
@@ -106,18 +106,22 @@ Saves and settings are written to `user_data` beside the executable.
 
 ## Settings
 
-Press F4 in game for the ReXGlue settings overlay. Settings can also be given
-on the command line, for example `--fullscreen=true`.
+Press F4 in game for the settings window (search box at the top; "Save to
+config" keeps them in `espgaluda2_recomp.toml` next to the game). Settings can
+also be given on the command line, for example `--fullscreen=true`. Every
+setting with its default is in [docs/settings.md](docs/settings.md).
 
-Changes in this port:
+The ones changed by this port (native renderer, the default):
 
-- **Input latency** (`latency_patch`, on by default): the game's D3D swap waits
-  for its own frame instead of running one frame ahead of the GPU. This cuts
-  about one frame of input lag.
-- **Display-locked vblank** (`vsync_display_lock`, off by default): moves the
-  game's 60 Hz timer in step with the frames the display actually shows. Only
-  has an effect with a queued present mode (for example Steam Game Mode without
-  Allow Tearing).
+- `renut_vsync` (off by default): off shows each picture at once, the least
+  input lag, tearing possible; on waits for the display's refresh.
+- `futari_vblank_display_sync` (on by default): the game's 60 Hz vertical blank
+  follows the display's refresh (see the FAQ above).
+- `latency_patch` (on by default): the game's swap waits for its own frame
+  instead of running one frame ahead of the GPU.
+- `futari_fill_crop` (off by default): on a 16:10 or 4:3 screen, on fills the
+  screen by trimming only the wallpaper at the sides; off shows black bars.
+- `renut_resolution`: the internal resolution, 720p (the game's own) by default.
 
 In Steam Game Mode, turn on **Allow Tearing** in the quick menu (Performance) to
 get presentation without vsync. Without it, gamescope forces mailbox mode.
