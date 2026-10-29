@@ -15,16 +15,16 @@ Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) thoug
 
 ### Is this a native port or just a glorified emulator?
 
-A native port. The game's code and graphics run natively; only audio decoding and the console's system calls are
-reproduced, as in any recompilation project.
+A native port. The game's code and graphics run natively. Only the audio decoding and the console's system calls are
+reproduced.
 
 - **Game code: native.** The PowerPC code of `default.xex` and the seven `dat*.xex` modules is recompiled ahead of time
   into C++ and runs directly on x86-64. There is no CPU emulation and no JIT.
 - **Graphics: native by default.** reNut's Direct3D-level renderer draws the game's Direct3D calls with Vulkan. There
   is no Xbox 360 GPU emulation. The emulated GPU stays available with `espgaluda2_renderer=xenos`.
 - **Audio: emulated decoding.** The game's music is XMA, which the SDK decodes behind an emulated Xbox 360 XMA decoder.
-- **System calls: reimplemented.** The Xbox kernel and XAM calls are Xenia-derived reimplementations in C++, compiled
-  with the game. There is no console firmware or BIOS.
+- **System calls: reimplemented.** The Xbox kernel and XAM calls are Xenia-derived reimplementations in C++, built
+  into the executable.
 
 ### Is this AI slop?
 
