@@ -67,11 +67,11 @@ those games share with this one still needs checking.
 ## Status
 
 - Boots and plays all six modes (Black Label, Arrange, Arcade, Xbox 360 and both Novice modes): each reaches
-  gameplay, takes every direction and button, and goes on through death, continue or game over, the title, the
-  rankings and the demo. Novice and Xbox 360 modes were also played through the first loop with sound and working
+  gameplay and takes every direction and button; Black Label, Arrange, Arcade and Xbox 360 go on through death,
+  continue or game over, the title, the rankings and the demo. Novice and Xbox 360 modes were also played through the first loop with sound and working
   slowdown.
 - The native renderer (the default) holds 60 game updates a second, locked to the display's refresh on 60, 120 and
-  240 Hz screens, as a native Wayland window or through X11/Xwayland. Vsync is off by default; on a Steam Deck the
+  240 Hz screens as a native Wayland window or under gamescope; through a desktop's Xwayland it keeps a 60 Hz timer. Vsync is off by default; on a Steam Deck the
   pad read reaches the present in 0.8-0.9 ms.
 - Tested on:
   - an AMD handheld (RADV) on the desktop and in Steam Game Mode;
