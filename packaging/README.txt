@@ -52,3 +52,5 @@ Checking the game's speed
 every second: game updates, guest vblanks and presents a second, and the
 display's refresh rate. The game should show 60 updates a second on any
 display (also at 120 or 144 Hz).
+
+Every setting, with its default and what it does: docs/settings.md in the source repository.
