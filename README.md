@@ -49,9 +49,13 @@ just before a refresh. It needs a Vulkan driver with present wait
 mailbox. With immediate presentation, or without present wait, it falls back to
 the plain timer.
 
-The native renderer has its own version, on by default (`futari_vblank_display_sync`): the game's vertical blank
-follows the display's refresh on 60, 120 and 240 Hz screens, and falls back to the 60 Hz timer where the display's
-timing cannot be followed (for example through Xwayland under a desktop compositor).
+The native renderer has its own version, on by default (`futari_vblank_display_sync`). It is not vsync: vsync
+(`renut_vsync`, off by default) decides whether a finished picture waits for the display's next refresh, while this
+decides when the game starts each frame. The game's 60 Hz vertical blank (where it reads the pad and starts the frame)
+follows the display's real refresh on a display at a whole multiple of 60 Hz (60, 120, 180, 240 Hz), and falls back to
+the 60 Hz timer where the display's timing cannot be followed (for example through Xwayland under a desktop
+compositor). The game runs at 60 frames a second either way. It works with vsync off: on a 240 Hz laptop display with
+vsync off the game's vertical blank stayed locked to every fourth refresh at 60 fps.
 
 ### Will audio become native?
 
