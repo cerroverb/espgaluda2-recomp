@@ -13,13 +13,18 @@ No game data is included. You need your own dump of the game.
 
 Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) though maybe.
 
-### Is this a native port?
+### Is this a native port or just a glorified emulator?
 
-The game code is: the PowerPC code of `default.xex` and the seven `dat*.xex` modules is recompiled ahead of time into
-C++ and runs directly on x86-64, with no CPU emulation or JIT. Graphics are native by default too: the game's
-Direct3D calls are drawn by reNut's Direct3D-level renderer on Vulkan, with no Xbox 360 GPU emulation (the emulated
-GPU stays available with `espgaluda2_renderer=xenos`). Audio still goes through emulated XMA decoding, and the Xbox
-kernel and XAM calls are Xenia-derived reimplementations in C++.
+A native port. The game's code and graphics run natively; only audio decoding and the console's system calls are
+reproduced, as in any recompilation project.
+
+- **Game code: native.** The PowerPC code of `default.xex` and the seven `dat*.xex` modules is recompiled ahead of time
+  into C++ and runs directly on x86-64. There is no CPU emulation and no JIT.
+- **Graphics: native by default.** reNut's Direct3D-level renderer draws the game's Direct3D calls with Vulkan. There
+  is no Xbox 360 GPU emulation. The emulated GPU stays available with `espgaluda2_renderer=xenos`.
+- **Audio: emulated decoding.** The game's music is XMA, which the SDK decodes behind an emulated Xbox 360 XMA decoder.
+- **System calls: reimplemented.** The Xbox kernel and XAM calls are Xenia-derived reimplementations in C++, compiled
+  with the game. There is no console firmware or BIOS.
 
 ### Is this AI?
 
