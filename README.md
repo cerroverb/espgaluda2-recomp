@@ -13,7 +13,7 @@ No game data is included. You need your own dump of the game.
 
 Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) though maybe.
 
-### Is this a native port?
+### Is this a native port or just a glorified emulator?
 
 The game code is: the PowerPC code of `default.xex` and the seven `dat*.xex` modules is recompiled ahead of time into
 C++ and runs directly on x86-64, with no CPU emulation or JIT. Graphics are native by default too: the game's
@@ -21,7 +21,7 @@ Direct3D calls are drawn by reNut's Direct3D-level renderer on Vulkan, with no X
 GPU stays available with `espgaluda2_renderer=xenos`). Audio still goes through emulated XMA decoding, and the Xbox
 kernel and XAM calls are Xenia-derived reimplementations in C++.
 
-### Is this AI?
+### Is this AI slop?
 
 Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
 futari-nx (the renderer port and its input-lag work), reNut (the Direct3D-level renderer), UnleashedRecomp (frame
