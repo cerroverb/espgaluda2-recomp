@@ -43,7 +43,6 @@
 #endif
 
 REXCVAR_DECLARE(bool, futari_vblank_display_sync);  // src/me/me_native_system.cpp
-REXCVAR_DECLARE(bool, present_letterbox);           // the SDK's presenter (src/ui/presenter.cpp); espgaluda2-recomp
 
 // banjo-nx (2026-10-17, deko3d renderer tests): the captures copy the game's frame texture as it is (4-byte formats only,
 // its channels as BGRA), without the scan-out pass: which of the two a wrong capture comes from.
@@ -111,22 +110,34 @@ struct FrameFit {
   float visible[2] = {1.0f, 1.0f};  // the share of the frame shown on each axis
 };
 
-// espgaluda2-recomp (original code, replacing futari-nx's fit, which trimmed up to 15% of the frame to fill the
-// output: on a 16:10 screen it cut 10% off the sides of this game's 16:9 image). The same rule as the SDK's
-// presenter (rexglue-sdk src/ui/presenter.cpp, overscan cutoff off as its default): with present_letterbox the
-// whole frame keeps its proportions, centred, with black bars (letterbox or pillarbox); without, it is stretched
-// over the whole output. Edges in whole pixels, so a 2x frame (renut_resolution 1440p on 2560x1600) is pixel-exact.
+// espgaluda2-recomp (2026-10-29, as futari-linux a1f2241): ported from the SDK's presenter (rexglue-sdk
+// src/ui/presenter.cpp GetPaintFlowForGuestOutput) with its defaults, overscan cutoff off (safe area 100) and
+// present_letterbox on: the whole frame keeps its proportions, centred, with black bars (letterbox or pillarbox), in
+// whole pixels, so a 2x frame (renut_resolution 1440p on 2560x1600) is pixel-exact. Replaces the own fit of
+// 2026-10-28. Its present_letterbox-off stretch is left out: the picture is never stretched (owner's rule).
 FrameFit FitFrame(uint32_t out_w, uint32_t out_h, uint32_t src_w, uint32_t src_h) {
   FrameFit fit;
   fit.viewport = plume::RenderViewport(0.0f, 0.0f, float(out_w), float(out_h));
-  if (src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0 || !REXCVAR_GET(present_letterbox))
+  if (src_w == 0 || src_h == 0 || out_w == 0 || out_h == 0)
     return fit;
-  uint32_t w = out_w, h = out_h;
-  if (uint64_t(out_w) * src_h > uint64_t(out_h) * src_w)
-    w = uint32_t((uint64_t(out_h) * src_w + src_h / 2) / src_h);  // wider output: pillarbox
-  else
-    h = uint32_t((uint64_t(out_w) * src_h + src_w / 2) / src_w);  // taller output: letterbox
-  fit.viewport = plume::RenderViewport(float((out_w - w) / 2), float((out_h - h) / 2), float(w), float(h));
+  auto rescale_unsigned = [](uint32_t value, uint32_t new_scale, uint32_t old_scale) -> uint32_t {
+    return uint32_t((uint64_t(value) * new_scale + (old_scale >> 1)) / old_scale);
+  };
+  uint32_t w, h, x, y;
+  if (uint64_t(out_w) * src_h > uint64_t(out_h) * src_w) {
+    // The window is wider than the source: the full height, bars at the sides.
+    h = out_h;
+    w = rescale_unsigned(out_h, src_w, src_h);
+    x = (out_w - w) / 2;
+    y = 0;
+  } else {
+    // The window is taller than the source: the full width, bars at the top and bottom.
+    w = out_w;
+    h = rescale_unsigned(out_w, src_h, src_w);
+    x = 0;
+    y = (out_h - h) / 2;
+  }
+  fit.viewport = plume::RenderViewport(float(x), float(y), float(w), float(h));
   return fit;
 }
 
@@ -137,9 +148,9 @@ void LogFrameFit(uint32_t out_w, uint32_t out_h, uint32_t src_w, uint32_t src_h,
   if (std::equal(std::begin(now), std::end(now), std::begin(last)))
     return;
   std::copy(std::begin(now), std::end(now), std::begin(last));
-  RGPU_INFO("Output {}x{}: the game's {}x{} image shown at {}x{} from ({}, {}) (present_letterbox {})", out_w, out_h,
+  RGPU_INFO("Output {}x{}: the game's {}x{} image shown at {}x{} from ({}, {})", out_w, out_h,
             src_w, src_h, uint32_t(fit.viewport.width), uint32_t(fit.viewport.height), uint32_t(fit.viewport.x),
-            uint32_t(fit.viewport.y), REXCVAR_GET(present_letterbox) ? "on" : "off");
+            uint32_t(fit.viewport.y));
 }
 
 // banjo-nx (2026-10-20, banjo_renut_game_gamma): the gamma ramp the game loads, which the 360's display applies to

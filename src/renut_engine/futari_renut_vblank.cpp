@@ -62,12 +62,12 @@ REXCVAR_DECLARE(bool, futari_vblank_display_sync);  // likewise
 REXCVAR_DECLARE(int32_t, futari_vblank_delay_us);   // likewise
 REXCVAR_DECLARE(bool, futari_vblank_phase_auto);    // likewise
 REXCVAR_DECLARE(int32_t, futari_vblank_phase_max_us);  // likewise
-// espgaluda2-recomp (original code, WORKLOG.md "Standing frame queue"); used in FromPresents.
-REXCVAR_DEFINE_INT32(espgaluda2_vblank_drain_frames, 30, "Espgaluda2/Renut",
-                     "With futari_vblank_display_sync: after this many images in a row shown a refresh late (one "
-                     "queued behind another at the display: a frame more input lag), skip one guest vblank so the "
-                     "queue empties (0 = never)")
-    .range(0, 600)
+// espgaluda2-recomp (2026-10-29, from futari-linux a1f2241): UnleashedRecomp's wait for the previous image before a
+// frame starts (FromPresents below). Replaces the own espgaluda2_vblank_drain_frames.
+REXCVAR_DEFINE_BOOL(futari_vblank_wait_shown, true, "Espgaluda2/Renut",
+                    "With futari_vblank_display_sync on a display of one refresh a game frame (60 Hz): the guest vblank "
+                    "waits (at most a frame) until the newest image is on screen, so no image stays queued behind "
+                    "another (a frame more input lag)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 // futari-nx (2026-10-20): banjo-nx's display thread's placement (display_sync.cpp: priority 0x2C, pinned to core 2)
@@ -237,6 +237,10 @@ struct DisplayGrid {
   uint64_t best_since_ns = 0;
   uint64_t late_images = 0;   // shown a refresh later than the best (since the last read)
   uint64_t on_time = 0;       // shown at the best (since the last read)
+  // espgaluda2-recomp (from futari-linux): the newest present known to be on screen (or given up on), for
+  // futari_vblank_wait_shown.
+  uint64_t shown_count = 0;
+  std::condition_variable shown_cv;
 };
 
 uint64_t SteadyNs() {
@@ -263,6 +267,11 @@ void ObservePresents(DisplayGrid* grid, double nominal_ns, const std::atomic<boo
     const int shown = renut::gpu::Video::WaitPresentShown(newest, 50000000ull, &submitted);
     if (shown == 0) continue;  // not yet: wait for the same one (or a newer one) again
     done = newest;
+    {  // espgaluda2-recomp (from futari-linux): futari_vblank_wait_shown
+      std::lock_guard lock(grid->mutex);
+      grid->shown_count = newest;
+    }
+    grid->shown_cv.notify_all();
     if (shown < 0) continue;
     const double t = double(SteadyNs());
     std::lock_guard lock(grid->mutex);
@@ -393,14 +402,16 @@ bool FromPresents(double nominal_ns) {
               phase_auto ? fmt::format("its phase found by measurement, at most {} us after it", phase_max_us)
                          : fmt::format("{} us after it", delay_us));
   double last_refresh = 0;
-  // espgaluda2-recomp (original code, WORKLOG.md "Standing frame queue"): an image queued behind another at the display
-  // stays queued for good when the game makes exactly one a refresh (after a stall that sent two in one refresh): every
-  // image is then shown a refresh late (input -> GPU done 33.6 ms instead of 17-19, swap -> present 15 ms), and the
-  // phase above only moves earlier. All images late for espgaluda2_vblank_drain_frames: one guest vblank is skipped, so one
-  // refresh gets no new image and the queued one is shown; one frame is shown twice, once (at most every 2 s).
-  const int32_t drain_after = REXCVAR_GET(espgaluda2_vblank_drain_frames);
-  uint64_t late_run = 0, drains = 0, next_drain_ns = 0;
-  bool drain = false;
+  // espgaluda2-recomp (2026-10-29, from futari-linux a1f2241): an image queued behind another at the display stays queued
+  // for good when the game makes exactly one a refresh (after a stall that sent two in one refresh): every image is then
+  // shown a refresh late, a frame more input lag (measured here: input -> GPU done 33.6 ms instead of 17-19), and the
+  // phase above only moves earlier. UnleashedRecomp's answer (github.com/hedge-dev/UnleashedRecomp cf829a9,
+  // UnleashedRecomp/gpu/video.cpp Video::WaitOnSwapChain, plume's VulkanSwapChain::wait with a maximum frame latency of
+  // 1): a frame starts only once the previous image is on screen. Here the frame starts at the guest vblank, so the
+  // vblank waits, at most a frame, until the observer has seen the newest present shown; after a stall that one vblank
+  // comes a refresh later and the queue is empty again. Only at one refresh a game frame.
+  const bool wait_shown = every == 1 && REXCVAR_GET(futari_vblank_wait_shown);
+  uint64_t shown_waits = 0;  // vblanks that waited more than 1 ms (since the last report)
   while (g_running.load(std::memory_order_acquire)) {
     double target;
     uint64_t late = 0, on_time = 0;
@@ -438,19 +449,11 @@ bool FromPresents(double nominal_ns) {
       if (++report >= 600) {  // every 10 s at 60 Hz
         report = 0;
         REXLOG_INFO("[latency] guest vblank {:.2f} ms after the display's refresh (futari_vblank_phase_auto, from the "
-                    "presents), ceiling {:.2f} ms, {} images shown a refresh late in all, {} queues drained",
-                    double(delay_us) / 1000.0, double(ceiling_us) / 1000.0, late_total, drains);
-      }
-    }
-    // espgaluda2-recomp (original code): the standing queue (above).
-    if (drain_after > 0) {
-      late_run = on_time ? 0 : late_run + late;
-      const uint64_t now = SteadyNs();
-      if (late_run >= uint64_t(drain_after) && now >= next_drain_ns) {
-        drain = true;
-        late_run = 0;
-        next_drain_ns = now + 2000000000ull;
-        ++drains;
+                    "presents), ceiling {:.2f} ms, {} images shown a refresh late in all, {} vblanks waited for the "
+                    "previous image (futari_vblank_wait_shown {})",
+                    double(delay_us) / 1000.0, double(ceiling_us) / 1000.0, late_total, shown_waits,
+                    wait_shown ? "on" : "off");
+        shown_waits = 0;
       }
     }
     // Sleep to 0.5 ms before the vblank, then yield to it.
@@ -462,9 +465,14 @@ bool FromPresents(double nominal_ns) {
       else
         std::this_thread::yield();
     }
-    if (drain) {  // espgaluda2-recomp: this refresh without a guest vblank (the standing queue, above)
-      drain = false;
-      continue;
+    if (wait_shown) {  // espgaluda2-recomp (from futari-linux): the previous image on screen first (above)
+      const uint64_t presented = renut::gpu::Video::PresentCount();
+      const uint64_t before = SteadyNs();
+      std::unique_lock lock(grid.mutex);
+      grid.shown_cv.wait_for(lock, std::chrono::nanoseconds(int64_t(nominal_ns)), [&] {
+        return grid.shown_count >= presented || !g_running.load(std::memory_order_acquire);
+      });
+      if (SteadyNs() - before > 1000000ull) ++shown_waits;
     }
     Vblank();
   }

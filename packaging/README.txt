@@ -23,7 +23,9 @@ the game. F11 switches fullscreen on and off.
                       2560x1440 or 2560x1600 -> 1440p, 3840x2160 -> 4K.
   fullscreen          true (default): fullscreen at the screen's own size.
   present_letterbox   true (default): the whole picture, black bars where the
-                      screen is not 16:9. false: stretched to fill the screen.
+                      screen is not 16:9. The native renderer always keeps
+                      the picture's shape; false stretches it only with
+                      the emulated renderer (espgaluda2_renderer=xenos).
   renut_vsync         true (default). false: no vsync (less lag, tearing).
 
 The same settings work as launch options or in the file, for example:
