@@ -25,8 +25,8 @@ kernel and XAM calls are Xenia-derived reimplementations in C++.
 
 Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
 futari-nx (the renderer port and its input-lag work), reNut (the Direct3D-level renderer), UnleashedRecomp (frame
-pacing, GPU choice) and the ReXGlue SDK, made to work for Espgaluda II on Linux. LLM assistance (Claude) was used in
-the porting and for the glue code between the pieces.
+pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
+assistance (Claude) was used in the porting.
 
 ### Does this port reduce input lag?
 
