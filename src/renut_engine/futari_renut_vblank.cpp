@@ -330,19 +330,6 @@ double DisplayRefreshHz() {
 // rate): the timer runs then.
 bool FromPresents(double nominal_ns) {
   if (!REXCVAR_GET(futari_vblank_display_sync) || rex::kernel::xboxkrnl::VblankPerSwap()) return false;
-#if !REX_PLATFORM_SWITCH && !defined(_WIN32)
-  // espgaluda2-recomp (original code, WORKLOG.md "Game speed on high refresh displays"): the refresh is only measured
-  // from the shown presents, and a game presenting at 60 Hz on a 120 Hz display is shown every other refresh, so the
-  // measurement takes the display for 60 Hz and the vblank drifted faster than the game's rate (up to 64 a second).
-  // The display's own mode from SDL decides: anything but the game's rate keeps the 60 Hz timer, as a rate with no
-  // whole multiple already does below.
-  if (const double display_hz = DisplayRefreshHz(); display_hz > 0 && std::fabs(display_hz - 1e9 / nominal_ns) > 0.5) {
-    REXLOG_INFO("[renut] vblank: the display runs at {:.3f} Hz (SDL), not the game's {:.2f} Hz: the {:.2f} Hz timer "
-                "stays (futari_vblank_display_sync follows only a display at the game's rate)",
-                display_hz, 1e9 / nominal_ns, 1e9 / nominal_ns);
-    return false;
-  }
-#endif
   // The renderer's swapchain may not exist yet: the timer's vblanks until it does, for at most 10 s.
   const uint64_t give_up = SteadyNs() + 10000000000ull;
   uint64_t next_timer = SteadyNs() + uint64_t(nominal_ns);
@@ -354,9 +341,26 @@ bool FromPresents(double nominal_ns) {
     }
     rex::thread::Sleep(std::chrono::microseconds(500));
   }
+  // espgaluda2-recomp (2026-10-29): ported from futari-linux ed296fa ("Vblank from the presents: start the grid from
+  // the display's own refresh period"), replacing the own rule of 2026-10-28 that kept the timer on any display not at
+  // the game's 60 Hz. The grid starts from the display's own period when SDL knows it and it is a whole fraction of
+  // the game's (a 60, 120 or 240 Hz panel; 144 Hz is no multiple, and the check below keeps the timer for it): a
+  // 60 Hz grid fed with the shown times of a 120 or 240 Hz panel stepped a refresh earlier every frame (here up to 64
+  // vblanks a second, in futari-linux 80 fps); with the display's own period every shown time lies on the grid.
+  double seed_ns = nominal_ns;
+#if !REX_PLATFORM_SWITCH && !defined(_WIN32)
+  const double display_hz = DisplayRefreshHz();
+  const double display_ns = display_hz > 1.0 ? 1e9 / display_hz : 0.0;
+  if (display_ns > 0 && display_ns < 1.05 * nominal_ns) {
+    const double m = std::round(nominal_ns / display_ns);
+    if (m >= 1 && std::fabs(nominal_ns / display_ns - m) < 0.02 * m) seed_ns = display_ns;
+  }
+  REXLOG_INFO("[renut] vblank: the display reports {:.3f} Hz; the grid starts from {:.3f} Hz",
+              display_ns > 0 ? 1e9 / display_ns : 0.0, 1e9 / seed_ns);
+#endif
   DisplayGrid grid;
   std::atomic<bool> observe{true};
-  std::thread observer(ObservePresents, &grid, nominal_ns, &observe);
+  std::thread observer(ObservePresents, &grid, seed_ns, &observe);
   // Learning the grid: the timer's vblanks while the first images are shown (the game presents once per vblank).
   const uint64_t learn_until = SteadyNs() + 2000000000ull;
   while (g_running.load(std::memory_order_acquire)) {
@@ -402,6 +406,13 @@ bool FromPresents(double nominal_ns) {
               phase_auto ? fmt::format("its phase found by measurement, at most {} us after it", phase_max_us)
                          : fmt::format("{} us after it", delay_us));
   double last_refresh = 0;
+  // espgaluda2-recomp (2026-10-29): ported from futari-linux 2026683 ("fall back to the timer when they do not follow a
+  // display"). Under a desktop compositor through XWayland (KWin on the Legion's NVIDIA) present wait reports when the
+  // compositor took each image, not a refresh; those times follow the game's own presents, which follow this grid, so
+  // the grid fed on itself and the game fell to 7 fps there. The vblanks of every 2 s are counted; a rate more than 3 %
+  // away from the display's gives the vblank back to the timer.
+  const double wanted_hz = 1e9 / (period * double(every));
+  uint64_t window_start = SteadyNs(), window_vblanks = 0;
   // espgaluda2-recomp (2026-10-29, from futari-linux a1f2241): an image queued behind another at the display stays queued
   // for good when the game makes exactly one a refresh (after a stall that sent two in one refresh): every image is then
   // shown a refresh late, a frame more input lag (measured here: input -> GPU done 33.6 ms instead of 17-19), and the
@@ -413,6 +424,23 @@ bool FromPresents(double nominal_ns) {
   const bool wait_shown = every == 1 && REXCVAR_GET(futari_vblank_wait_shown);
   uint64_t shown_waits = 0;  // vblanks that waited more than 1 ms (since the last report)
   while (g_running.load(std::memory_order_acquire)) {
+    {
+      const uint64_t now = SteadyNs();
+      const double elapsed = double(now - window_start);
+      if (elapsed >= 2e9) {
+        const double hz = double(window_vblanks) * 1e9 / elapsed;
+        if (std::fabs(hz - wanted_hz) > 0.03 * wanted_hz) {
+          REXLOG_INFO("[renut] vblank: the presents do not follow the display ({:.2f} vblanks a second instead of "
+                      "{:.2f}: a compositor's times, futari_vblank_display_sync): the {:.2f} Hz timer takes over",
+                      hz, wanted_hz, 1e9 / nominal_ns);
+          observe.store(false, std::memory_order_release);
+          observer.join();
+          return false;
+        }
+        window_start = now;
+        window_vblanks = 0;
+      }
+    }
     double target;
     uint64_t late = 0, on_time = 0;
     {
@@ -475,6 +503,7 @@ bool FromPresents(double nominal_ns) {
       if (SteadyNs() - before > 1000000ull) ++shown_waits;
     }
     Vblank();
+    ++window_vblanks;
   }
   observe.store(false, std::memory_order_release);
   observer.join();
