@@ -15,13 +15,18 @@ Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) thoug
 
 ### Is this a native port?
 
-Only the game code is native. The PowerPC code of `default.xex` and the seven
-`dat*.xex` modules is recompiled ahead of time into C++ and runs directly on
-x86-64, with no CPU emulation or JIT. Everything else still goes through
-emulation. ReXGlue's Xenia-derived Vulkan backend emulates the Xbox 360 GPU,
-including the Xenos command stream and EDRAM, and translates the game's shaders
-at runtime. Audio goes through emulated XMA decoding, and the Xbox kernel and XAM
-calls are Xenia's high-level implementations.
+The game code is: the PowerPC code of `default.xex` and the seven `dat*.xex` modules is recompiled ahead of time into
+C++ and runs directly on x86-64, with no CPU emulation or JIT. Graphics are native by default too: the game's
+Direct3D calls are drawn by reNut's Direct3D-level renderer on Vulkan, with no Xbox 360 GPU emulation (the emulated
+GPU stays available with `espgaluda2_renderer=xenos`). Audio still goes through emulated XMA decoding, and the Xbox
+kernel and XAM calls are Xenia-derived reimplementations in C++.
+
+### Is this AI?
+
+Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
+futari-nx (the renderer port and its input-lag work), reNut (the Direct3D-level renderer), UnleashedRecomp (frame
+pacing, GPU choice) and the ReXGlue SDK, made to work for Espgaluda II on Linux. LLM assistance (Claude) was used in
+the porting and for the glue code between the pieces.
 
 ### Does this port reduce input lag?
 
