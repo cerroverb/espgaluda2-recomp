@@ -53,16 +53,10 @@ The native renderer has its own version, on by default (`futari_vblank_display_s
 follows the display's refresh on 60, 120 and 240 Hz screens, and falls back to the 60 Hz timer where the display's
 timing cannot be followed (for example through Xwayland under a desktop compositor).
 
-### Will graphics and audio become native?
+### Will audio become native?
 
-Graphics are now native by default (branch `native-renderer`): the game's Direct3D calls are drawn directly with
-Vulkan by [reNut](https://github.com/masterspike52/reNut)'s Direct3D-level renderer, as
-[futari-nx](https://github.com/ChanseyIsTheBest/futari-nx) uses it, with no Xenos command stream, EDRAM model or
-runtime shader translation. `--espgaluda2_renderer=xenos` selects the old emulated GPU. The game builds its
-shaders at run time, so on a new build the first run with the native renderer captures them
-(`shader_capture/` next to the executable) and the next `./build.sh` adds them. Audio still uses the SDK's
-emulated XMA decoding: the game streams its music through the XMA decoder, and no existing project shows a
-native replacement yet. WORKLOG.md has the details.
+Audio still uses the SDK's XMA decoding: the game streams its music through the Xbox 360's XMA decoder, which the SDK
+reproduces (the decoding itself is FFmpeg's), and no existing project shows a native replacement yet.
 
 ### Can this help with other CAVE games?
 
