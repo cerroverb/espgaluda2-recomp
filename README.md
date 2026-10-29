@@ -26,12 +26,12 @@ reproduced, as in any recompilation project.
 - **System calls: reimplemented.** The Xbox kernel and XAM calls are Xenia-derived reimplementations in C++, compiled
   with the game. There is no console firmware or BIOS.
 
-### Is this AI?
+### Is this AI slop?
 
 Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
 futari-nx (the renderer port and its input-lag work), reNut (the Direct3D-level renderer), UnleashedRecomp (frame
 pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
-assistance (Claude) was used in the porting.
+assistance (Claude) was used in the porting, but with strict instructions to simply port and retool unless bespoke changes were necessary, which were made under my direct supervision, review and testing. 
 
 ### Does this port reduce input lag?
 
@@ -74,9 +74,7 @@ those games share with this one still needs checking.
 
 ## Status
 
-- Boots and plays all six modes (Black Label, Arrange, Arcade, Xbox 360 and both Novice modes): each reaches
-  gameplay and takes every direction and button; Black Label, Arrange, Arcade and Xbox 360 go on through death,
-  continue or game over, the title, the rankings and the demo. Novice and Xbox 360 modes were also played through the first loop with sound and working
+- Boots and plays all six modes (Black Label, Arrange, Arcade, Xbox 360 and both Novice modes) with sound and working
   slowdown.
 - The native renderer (the default) holds 60 game updates a second, locked to the display's refresh on 60, 120 and
   240 Hz screens as a native Wayland window or under gamescope; through a desktop's Xwayland it keeps a 60 Hz timer. Vsync is off by default; on a Steam Deck the
@@ -86,7 +84,7 @@ those games share with this one still needs checking.
   - a Steam Deck (RADV), headless runs of every mode and of 120 and 240 Hz displays;
   - a laptop with an NVIDIA RTX 5080 (driver 615) on KDE Plasma Wayland at 240 Hz.
   Intel GPUs should work but are untested. Please open an issue if something is wrong.
-- Slowdown accuracy compared to the arcade or the original 360 still needs checking by people who know the game well.
+- Slowdown accuracy compared to the arcade or the original 360 still needs checking by people who know the game well. I compared them against xenia-edge and my hardmodded xbox360 with my own physical copy of the game and it seems pretty accurate, but I don't have the best eye for this kind of thing, so more eyes would be great.
 
 ## Requirements
 
