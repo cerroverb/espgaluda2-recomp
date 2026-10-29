@@ -30,19 +30,17 @@ assistance (Claude) was used in the porting.
 
 ### Does this port reduce input lag?
 
-Yes, by about one frame, and this is on by default. The game's Direct3D Swap
-saves the GPU fence of the frame it just submitted and only waits for it at the
-next Swap. The CPU therefore runs a full frame ahead of a GPU that flips on
-vblank, and a pad read reaches the screen about two frames later. This port
-patches Swap to wait for its own frame's fence before returning, using the
-game's own fence wait. The next frame's game logic and pad read then start one
-frame later, closer to the flip, at the same 60 Hz pace. With the patch turned
-off, I measured about 32 ms from pad read to present in the menu. The patch can
-be turned off with `--latency_patch=false`.
+Yes, and this is on by default. The native renderer (the default) reads the pad as late as each frame allows and
+presents right after the game's Swap: on a Steam Deck I measured 0.8-0.9 ms from pad read to present. With the
+emulated renderer (`espgaluda2_renderer=xenos`) a patch removes about one frame: the game's Direct3D Swap saves the
+GPU fence of the frame it just submitted and only waits for it at the next Swap, so the CPU runs a full frame ahead
+of a GPU that flips on vblank. The patch makes Swap wait for its own frame's fence, using the game's own fence wait.
+There I measured about 32 ms from pad read to present without the patch and about 16 ms with it. It can be turned
+off with `--latency_patch=false`.
 
 ### What does vsync_display_lock do?
 
-It is built in but off by default. Normally the game's 60 Hz vblank timer runs on
+It applies to the emulated renderer only and is off by default. Normally the game's 60 Hz vblank timer runs on
 its own, so a flip can land anywhere between two display refreshes. With
 `--vsync_display_lock=true`, the timer follows when presented frames are actually
 shown on screen, using `VK_KHR_present_wait`, and is nudged so each flip lands
@@ -50,6 +48,10 @@ just before a refresh. It needs a Vulkan driver with present wait
 (`vulkan_present_wait`, on by default) and a queued present mode such as FIFO or
 mailbox. With immediate presentation, or without present wait, it falls back to
 the plain timer.
+
+The native renderer has its own version, on by default (`futari_vblank_display_sync`): the game's vertical blank
+follows the display's refresh on 60, 120 and 240 Hz screens, and falls back to the 60 Hz timer where the display's
+timing cannot be followed (for example through Xwayland under a desktop compositor).
 
 ### Will graphics and audio become native?
 
