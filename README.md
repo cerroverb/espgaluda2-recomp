@@ -18,8 +18,9 @@ Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) thoug
 A native port. The only thing that is still emulated is audio. The game code (`default.xex` and the seven `dat*.xex`
 modules) is recompiled ahead of time to C++, with no CPU emulation or JIT. The graphics are drawn by reNut's renderer
 from the game's Direct3D calls with Vulkan, with no GPU emulation (`espgaluda2_renderer=xenos` for the emulated GPU).
-The audio is XMA, decoded behind the SDK's emulated decoder. The system calls are Xenia-derived reimplementations in
-C++.
+The audio is the emulated part. The game streams its music in XMA, the Xbox 360's audio format, to the console's XMA
+decoder chip, and the SDK emulates that chip (FFmpeg does the decoding). The system calls are Xenia-derived
+reimplementations in C++.
 
 ### Is this AI slop?
 
