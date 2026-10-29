@@ -107,6 +107,17 @@ class ProgressDialog final : public rex::ui::ImGuiDialog {
 
  protected:
   void OnDraw(ImGuiIO& io) override {
+    // reNut overlay_ui.cpp ContextScope: with the native renderer this file's ImGui calls reach the executable's own
+    // ImGui copy (src/renut_engine/gpu/gpu.cmake, hidden), whose current context is the overlay's or none. io belongs
+    // to the SDK's context; the two copies are the same ImGui 1.92.5 source, so this copy can draw into it.
+    ImGuiContext* previous = ImGui::GetCurrentContext();
+    ImGui::SetCurrentContext(io.Ctx);
+    DrawPopup(io);
+    ImGui::SetCurrentContext(previous);
+  }
+
+ private:
+  void DrawPopup(ImGuiIO& io) {
     std::string message;
     if (auto state = state_.lock()) {
       std::lock_guard lock(state->mutex);
