@@ -82,6 +82,7 @@ those games share with this one still needs checking.
   - a laptop with an NVIDIA RTX 5080 (driver 615) on KDE Plasma Wayland at 240 Hz.
   Intel GPUs should work but are untested. Please open an issue if something is wrong.
 - Slowdown accuracy compared to the arcade or the original 360 still needs checking by people who know the game well. I compared them against xenia-edge and my hardmodded xbox360 with my own physical copy of the game and it seems pretty accurate, but I don't have the best eye for this kind of thing, so more eyes would be great.
+- Certain things could use further testing. Two players and replays, for example, so feel free to shit up the issues section with any problems you have. 
 
 ## Requirements
 
