@@ -2,7 +2,7 @@
 
 # Espgaluda II Black Label Recomp
 
-A Linux x86-64 port of the Xbox 360 version of Espgaluda II Black Label,
+A Linux x86-64 and AArch64 port of the Xbox 360 version of Espgaluda II Black Label,
 statically recompiled with [ReXGlue](https://github.com/rexglue/rexglue-sdk).
 It builds on the SDK copy bundled in
 [SDOJ-Recomp](https://github.com/eandis/SDOJ-Recomp).
@@ -13,7 +13,7 @@ No game data is included. You need your own dump of the game.
 
 ### Windows/macOS?
 
-Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll consider a Windows version BIG MAYBE THOUGH.
+Fork it if you want that, I'm not doing it. Linux AArch64 is out now (see Releases); BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll consider a Windows version BIG MAYBE THOUGH.
 
 ### Is this a native port or just a glorified emulator?
 
@@ -88,14 +88,16 @@ those games share with this one still needs checking.
 
 ## Requirements
 
-- An x86-64 Linux system with a Vulkan GPU driver (Mesa RADV/ANV, or NVIDIA).
+- An x86-64 or AArch64 (ARM64) Linux system with a Vulkan GPU driver (Mesa RADV/ANV/Turnip, or NVIDIA); the AArch64
+  build needs glibc 2.38 or newer.
 - Your own copy of Espgaluda II Black Label (Xbox 360), either as an `.iso`
   or as extracted files (`default.xex`, `dat00.xex` ... `dat164.xex` and the
   `res` folder).
 
 ## Install
 
-1. Download `espgaluda2-recomp-linux-amd64.tar.gz` from Releases and unpack it.
+1. Download `espgaluda2-recomp-linux-amd64.tar.gz` (x86-64) or `espgaluda2-recomp-linux-arm64.tar.gz` (AArch64)
+   from Releases and unpack it.
 2. Add the game, one of two ways:
    - **ISO:** put the `.iso` next to `espgaluda2-recomp.sh`. The first launch
      extracts it into `game_data` (a progress window shows while it runs),
