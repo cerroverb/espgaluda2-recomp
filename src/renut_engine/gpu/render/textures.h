@@ -105,6 +105,10 @@ struct HostTexture {
   // hash (SampleHash) taken with the last of them.
   uint32_t stable_checks = 0;
   uint64_t stable_sample_hash = 0;
+  // espgaluda2-recomp (RefreshLinearLocked, frame pacing): the stable texture's bytes in kLinearVerifyFrames slices,
+  // one checked per bound frame (stable_slice), each against its hash taken with the last full hash.
+  std::vector<uint64_t> stable_slice_hashes;
+  uint32_t stable_slice = 0;
   // What SampleHash / ContentHash read: the base level's and the mip chain's
   // first page and extent in bytes, fixed by desc, worked out at the first check.
   bool sample_known = false;

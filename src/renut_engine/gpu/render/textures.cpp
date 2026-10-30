@@ -83,7 +83,7 @@ uint64_t g_frame = 1;
 // espgaluda2-recomp: see RefreshLinearLocked.
 REXCVAR_DEFINE_BOOL(espgaluda2_renderer_stable_linear_sampling, true, "Espgaluda2/Renut",
                     "Renut's renderer: a linear texture unchanged for 60 checks is checked with a sampled hash, and in "
-                    "full every 30 frames (false: in full at every check)")
+                    "full over every 30 bound frames, a thirtieth each frame (false: in full at every check)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 // Resources D3D::UnlockResource was called on since the last bind that
@@ -861,6 +861,27 @@ void ApplyUnlocksLocked() {
 //   stopped changing.
 // - Otherwise the content is hashed at every check.
 // A write after the check shows the next frame.
+// espgaluda2-recomp (original code, WORKLOG.md "Frame pacing"): the hash of one of a linear texture's
+// kLinearVerifyFrames equal slices of its guest bytes (both ranges SampleHash and ContentHash read, in that order).
+uint64_t SliceHash(const HostTexture &t, uint32_t slice) {
+  uint64_t total = 0;
+  for (u32 i = 0; i < 2; ++i)
+    total += t.sample_pages[i] ? t.sample_sizes[i] : 0;
+  const uint64_t begin = total * slice / kLinearVerifyFrames, end = total * (slice + 1) / kLinearVerifyFrames;
+  uint64_t hash = 0, at = 0;
+  for (u32 i = 0; i < 2; ++i) {
+    const uint32_t page = t.sample_pages[i], size = t.sample_sizes[i];
+    if (!page || !size)
+      continue;
+    const uint64_t from = std::max(begin, at), to = std::min(end, at + size);
+    if (from < to)
+      hash = banjo::renut_gpu::ContentHash64(GuestPhysicalPtr<const uint8_t>(page << 12) + (from - at), to - from,
+                                             hash);
+    at += size;
+  }
+  return hash;
+}
+
 void RefreshLinearLocked(HostTexture &t, const TextureFetch &fetch) {
   static const bool kStableLinearSampling = REXCVAR_GET(espgaluda2_renderer_stable_linear_sampling);
   ApplyUnlocksLocked();
@@ -872,7 +893,12 @@ void RefreshLinearLocked(HostTexture &t, const TextureFetch &fetch) {
   // banjo-nx (2026-10-19, render-thread proposal 1): every hash through CheckedHash (the cards).
   if (!t.uploaded) {
     upload(CheckedHash(fetch, t, false));
-    t.verified_frame = g_frame;
+    // espgaluda2-recomp (original code, WORKLOG.md "Frame pacing"): each texture starts at its own point of the
+    // kLinearVerifyFrames cycle. Espgaluda II loads its sprite atlases in one frame, so their full checks all fell
+    // due in the same frame every 30 frames (a burst of full hashes, that frame's present ~4.5 ms late on the
+    // Deck). The checks stay every kLinearVerifyFrames per texture; only which frame each falls on differs.
+    static uint32_t next_phase = 0;
+    t.verified_frame = g_frame - std::min<uint64_t>(g_frame, next_phase++ % kLinearVerifyFrames);
   } else if (t.lock_driven) {
     const bool watched = g_frame - t.unlock_frame < kUnlockWatchFrames;
     if (t.unlocked) {
@@ -911,8 +937,15 @@ void RefreshLinearLocked(HostTexture &t, const TextureFetch &fetch) {
     // while it matches, and in full every kLinearVerifyFrames. Espgaluda II's sprite atlases are 2048x2048 linear
     // textures loaded before their first bind, so never lock-driven: hashing each in full whenever bound read ~9 GB a
     // second on the render thread (up to 13 ms a frame). Any sampled difference or unlock goes back to full hashes.
-    if (kStableLinearSampling && t.stable_checks >= kStableChecks && !verify_due && !t.unlocked) {
-      if (SampleHash(fetch, t) == t.stable_sample_hash) {
+    // Frame pacing (WORKLOG.md "Frame pacing"): the full check every kLinearVerifyFrames is made a slice at a time,
+    // one of kLinearVerifyFrames slices each bound frame, so every byte is still checked within kLinearVerifyFrames
+    // bound frames but no frame hashes a whole atlas (that frame's present came ~2-4.5 ms late on the Deck). A slice
+    // that differs goes back to full hashes, as a sampled difference does.
+    if (kStableLinearSampling && t.stable_checks >= kStableChecks && !t.unlocked &&
+        t.stable_slice_hashes.size() == kLinearVerifyFrames) {
+      if (SampleHash(fetch, t) == t.stable_sample_hash &&
+          SliceHash(t, t.stable_slice) == t.stable_slice_hashes[t.stable_slice]) {
+        t.stable_slice = (t.stable_slice + 1) % kLinearVerifyFrames;
         t.unlocked = false;
         return;
       }
@@ -928,8 +961,13 @@ void RefreshLinearLocked(HostTexture &t, const TextureFetch &fetch) {
       t.changes = 0;
       if (verify_due)
         t.verified_frame = g_frame;
-      if (++t.stable_checks >= kStableChecks)
+      if (++t.stable_checks >= kStableChecks) {
         t.stable_sample_hash = SampleHash(fetch, t);
+        t.stable_slice_hashes.resize(kLinearVerifyFrames);
+        for (uint32_t i = 0; i < kLinearVerifyFrames; ++i)
+          t.stable_slice_hashes[i] = SliceHash(t, i);
+        t.stable_slice = 0;
+      }
     }
   }
   t.unlocked = false;
