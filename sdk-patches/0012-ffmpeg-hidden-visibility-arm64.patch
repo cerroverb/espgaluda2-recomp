@@ -1,0 +1,54 @@
+# espgaluda2-recomp (2026-10-30): upstream rexglue-sdk d82ec28 (Tom Clay, 2026-05-12), "fix(ffmpeg): hide internal
+# symbols for linux-arm64 shared link", unchanged. Without it librexruntime.so does not link on Linux AArch64.
+diff --git a/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt b/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt
+--- a/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt
++++ b/thirdparty/rexglue-sdk/thirdparty/CMakeLists.txt
+@@ -232,8 +232,10 @@ set(SDL_STATIC ON CACHE BOOL "" FORCE)
+ set(SDL_TEST OFF CACHE BOOL "" FORCE)
+ set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+ 
+-# Disable unused subsystems
+-set(SDL_VIDEO OFF CACHE BOOL "" FORCE)
++# Video provides the windowing/event layer; presenters create their own
++# D3D12/Vulkan surfaces from native handles, so SDL_RENDER and the SDL
++# graphics API integrations stay off.
++set(SDL_VIDEO ON CACHE BOOL "" FORCE)
+ set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+ set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+ set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+@@ -249,7 +251,8 @@ set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+ # Disable graphics APIs (unused without video)
+ set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
+ set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+-set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
++# espgaluda2-recomp (sdk-patches/0006): on, so an app renderer can make its surface with SDL_Vulkan_CreateSurface.
++set(SDL_VULKAN ON CACHE BOOL "" FORCE)
+ set(SDL_METAL OFF CACHE BOOL "" FORCE)
+ 
+ # Disable dummy drivers
+@@ -257,8 +260,11 @@ set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
+ set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
+ set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
+ 
+-# Linux audio backends
++# Linux video and audio backends. Both video drivers are always built so the
++# one in use stays a runtime choice.
+ if(UNIX AND NOT APPLE)
++    set(SDL_X11               ON  CACHE BOOL "" FORCE)
++    set(SDL_WAYLAND           ON  CACHE BOOL "" FORCE)
+     set(SDL_ALSA              ON  CACHE BOOL "" FORCE)
+     set(SDL_ALSA_SHARED       ON  CACHE BOOL "" FORCE)
+     set(SDL_PULSEAUDIO        ON  CACHE BOOL "" FORCE)
+@@ -664,5 +670,10 @@ if(WIN32)
+     target_link_libraries(libavcodec PRIVATE bcrypt)
+ endif()
+ 
+-# IDE folder organization
+-set_target_properties(libavutil libavcodec PROPERTIES FOLDER "FFmpeg")
++# Hidden visibility is required on aarch64. The NEON .S files use ADRP/ADD
++# PC-relative addressing (movrel) for symbols like ff_cos_*, which the linker
++# only accepts against locally bound symbols when emitting a shared object.
++set_target_properties(libavutil libavcodec PROPERTIES
++    C_VISIBILITY_PRESET hidden
++    VISIBILITY_INLINES_HIDDEN ON
++    FOLDER "FFmpeg")
