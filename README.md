@@ -71,6 +71,10 @@ I hope so. It could be a starting point for other CAVE games on the Xbox 360,
 alongside [SDOJ-Recomp](https://github.com/eandis/SDOJ-Recomp). How much code
 those games share with this one still needs checking.
 
+### What's next for this project?
+
+Now that input latency and performance are in a good place, I'm working on an English translation patch for the menus, messages and tutorials. The text is sourced from the official English of the Switch release. Where the Xbox 360 version has messages the Switch does not (Xbox LIVE, storage devices, Achievements), the closest official Switch lines are adapted. The tutorial's Japanese button labels are redrawn using the game's own English font. A few obvious errors in the official text are corrected, and every change is listed in a file that ships with the patch. The patch is optional and can be turned off in the settings to play with the original Japanese text. It will be released shortly.
+
 ## Status
 
 - Boots and plays all six modes (Black Label, Arrange, Arcade, Xbox 360 and both Novice modes) with sound and working
