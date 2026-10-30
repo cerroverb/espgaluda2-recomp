@@ -2,9 +2,9 @@ name: Build Linux AArch64
 
 # The Linux AArch64 release build, on GitHub's ARM runner (Ubuntu 24.04, glibc 2.39). That runner has no
 # DirectXShaderCompiler, so the game's translated shaders and the host shaders come prebuilt from an x86-64 build
-# (SPIR-V, the same on every CPU) through the ESPGALUDA2_GPU_PREBUILT secret: a base64 tar.zst of that build's
-# renut_gpu/shader_cache.cpp and renut_gpu/host_shaders/*.spirv.h (the translated shaders are game-derived, so they
-# are kept out of the public tree; they ship inside the executable as on x86-64). ESPGALUDA2_PREBUILT_GPU_DIR makes the
+# (SPIR-V, the same on every CPU): the renderer's own host shaders from prebuilt/host_shaders, and the game's translated
+# shaders from the ESPGALUDA2_SHADER_CACHE secret (base64 zstd of that build's renut_gpu/shader_cache.cpp; game-derived,
+# so kept out of the public tree; they ship inside the executable as on x86-64). ESPGALUDA2_PREBUILT_GPU_DIR makes the
 # build use them (src/renut_engine/gpu/gpu.cmake).
 
 on:
@@ -40,11 +40,12 @@ jobs:
 
       - name: Unpack the prebuilt shaders
         env:
-          GPU_PREBUILT: ${{ secrets.ESPGALUDA2_GPU_PREBUILT }}
+          SHADER_CACHE: ${{ secrets.ESPGALUDA2_SHADER_CACHE }}
         run: |
           mkdir -p "$RUNNER_TEMP/gpu_prebuilt"
-          printf '%s' "$GPU_PREBUILT" | base64 -d | zstd -d | tar -x -C "$RUNNER_TEMP/gpu_prebuilt"
-          ls "$RUNNER_TEMP/gpu_prebuilt" "$RUNNER_TEMP/gpu_prebuilt/host_shaders" | wc -l
+          cp -r prebuilt/host_shaders "$RUNNER_TEMP/gpu_prebuilt/"
+          printf '%s' "$SHADER_CACHE" | base64 -d | zstd -d -o "$RUNNER_TEMP/gpu_prebuilt/shader_cache.cpp"
+          grep -c "0x" "$RUNNER_TEMP/gpu_prebuilt/shader_cache.cpp"
 
       - name: Restore compiler cache
         uses: actions/cache@v4
