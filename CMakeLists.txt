@@ -8,6 +8,12 @@ project(espgaluda2_recomp LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Source paths compiled into the binaries (__FILE__, debug info) relative to the tree, so a release does not carry
+# the build machine's folders (GCC/Clang -ffile-prefix-map; the build folder is inside the tree).
+if(NOT MSVC)
+    add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=")
+endif()
+
 option(REXGLUE_ENABLE_TRACY "Enable Tracy profiler integration" OFF)
 option(REXGLUE_ENABLE_PERF_COUNTERS "Enable lightweight perf counter registry and overlay" OFF)
 
