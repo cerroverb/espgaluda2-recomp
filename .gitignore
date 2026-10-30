@@ -21,6 +21,7 @@
 !/cmake/
 !/docs/
 !/LICENSE-GPL-3.0
+!/prebuilt/
 
 *.xex
 *.iso
