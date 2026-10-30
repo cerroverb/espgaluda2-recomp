@@ -1,3 +1,5 @@
+<img width="1200" height="394" alt="78e74fe725904ecf96a7fc1f6df0c645" src="https://github.com/user-attachments/assets/b0448a33-493a-4b94-a095-5ba73c67b8b2" />
+
 # Espgaluda II Black Label Recomp
 
 A Linux x86-64 port of the Xbox 360 version of Espgaluda II Black Label,
@@ -11,7 +13,7 @@ No game data is included. You need your own dump of the game.
 
 ### Windows/macOS?
 
-Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) though maybe.
+Fork it if you want that, I'm not doing it. Linux aarch64 and BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll consider a Windows version BIG MAYBE THOUGH.
 
 ### Is this a native port or just a glorified emulator?
 
