@@ -1,3 +1,4 @@
+<img width="1200" height="394" alt="78e74fe725904ecf96a7fc1f6df0c645" src="https://github.com/user-attachments/assets/b0448a33-493a-4b94-a095-5ba73c67b8b2" />
 
 # Espgaluda II Black Label Recomp
 
