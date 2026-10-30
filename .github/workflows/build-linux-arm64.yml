@@ -9,6 +9,9 @@ name: Build Linux AArch64
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - ci/arm64
 
 permissions:
   contents: read
