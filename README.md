@@ -1,3 +1,6 @@
+<img width="400" height="166" alt="93b3ef89-64f8-4a9a-9322-09fc0e3ef32b" src="https://github.com/user-attachments/assets/ff11e795-8563-44a8-b190-322dd596310b" />
+
+
 # Espgaluda II Black Label Recomp
 
 A Linux x86-64 port of the Xbox 360 version of Espgaluda II Black Label,
