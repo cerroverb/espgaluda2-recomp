@@ -74,11 +74,12 @@ jobs:
         run: |
           out=out/build/linux-arm64-release
           pkg=package/espgaluda2-recomp
-          mkdir -p $pkg/game_data $pkg/tools/extract-xiso
+          mkdir -p $pkg/game_data $pkg/tools/extract-xiso $pkg/translation
           cp -L $out/espgaluda2_recomp $out/*.so $pkg/
           cp $out/tools/extract-xiso/extract-xiso $pkg/tools/extract-xiso/
           cp $out/tools/extract-xiso/LICENSE.TXT $pkg/tools/extract-xiso/
           cp packaging/espgaluda2-recomp.sh packaging/README.txt LICENSE LICENSE-GPL-3.0 $pkg/
+          cp packaging/translation/english.tsv packaging/translation/README.txt packaging/translation/CHANGES.txt $pkg/translation/
           chmod +x $pkg/espgaluda2-recomp.sh
           file $pkg/espgaluda2_recomp
           ! strings $pkg/espgaluda2_recomp $pkg/*.so | grep -q "/home/runner"
