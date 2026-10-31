@@ -35,7 +35,7 @@ assistance was used in the porting, but with strict instructions to simply port 
 ### Does this port reduce input lag?
 
 Yes, and this is on by default. The native renderer (the default) reads the pad as late as each frame allows and
-presents right after the game's Swap: on a Steam Deck I measured 0.8-0.9 ms from pad read to present. With the
+presents right after the game's Swap: on an AMD handheld I measured 0.8-0.9 ms from pad read to present. With the
 emulated renderer (`espgaluda2_renderer=xenos`) a patch removes about one frame: the game's Direct3D Swap saves the
 GPU fence of the frame it just submitted and only waits for it at the next Swap, so the CPU runs a full frame ahead
 of a GPU that flips on vblank. The patch makes Swap wait for its own frame's fence, using the game's own fence wait.
@@ -82,12 +82,12 @@ Still in Japanese, and next on the list: the how-to-play captions shown after ch
 - Boots and plays all six modes (Black Label, Arrange, Arcade, Xbox 360 and both Novice modes) with sound and working
   slowdown.
 - The native renderer (the default) holds 60 game updates a second, locked to the display's refresh on 60, 120 and
-  240 Hz screens as a native Wayland window or under gamescope; through a desktop's Xwayland it keeps a 60 Hz timer. Vsync is off by default; on a Steam Deck the
+  240 Hz screens as a native Wayland window or under gamescope; through a desktop's Xwayland it keeps a 60 Hz timer. Vsync is off by default; on an AMD handheld the
   pad read reaches the present in 0.8-0.9 ms.
 - Tested on:
   - an AMD handheld (RADV) on the desktop and in Steam Game Mode;
-  - a Steam Deck (RADV), headless runs of every mode and of 120 and 240 Hz displays;
-  - a laptop with an NVIDIA RTX 5080 (driver 615) on KDE Plasma Wayland at 240 Hz.
+  - another AMD handheld (RADV), headless runs of every mode and of 120 and 240 Hz displays;
+  - a laptop with an NVIDIA GPU (driver 615) on KDE Plasma Wayland at 240 Hz.
   Intel GPUs should work but are untested. Please open an issue if something is wrong.
 - Slowdown accuracy compared to the arcade or the original 360 still needs checking by people who know the game well. I compared them against xenia-edge and my hardmodded xbox360 with my own physical copy of the game and it seems pretty accurate, but I don't have the best eye for this kind of thing, so more eyes would be great.
 - Certain things could use further testing. Two players and replays, for example, so feel free to shit up the issues section with any problems you have. 
