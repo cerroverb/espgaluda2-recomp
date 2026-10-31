@@ -8,6 +8,8 @@
 #include <rex/graphics/command_processor.h>
 #include <rex/graphics/graphics_system.h>
 #include <rex/filesystem.h>
+
+#include "translation.h"
 #include <rex/rex_app.h>
 #include <rex/system.h>
 #include <rex/system/kernel_state.h>
@@ -234,6 +236,9 @@ class Espgaluda2RecompApp : public rex::ReXApp {
   // futari-nx futari_app.h OnPostLoadXexImage: with ESPGALUDA2_DUMP_IMAGE=<file>, write the loaded default.xex image
   // (image_base..image_base+image_size), which tools/renut_dump_shaders.py reads the shader containers from.
   void OnPostLoadXexImage() override {
+    // espgaluda2-recomp (2026-10-30): the Switch release's English text, before the game runs (src/translation.cpp).
+    if (runtime() && runtime()->memory())
+      espgaluda2::translation::Apply(runtime()->memory(), PPCImageConfig.image_base, PPCImageConfig.image_size);
     const char* path = std::getenv("ESPGALUDA2_DUMP_IMAGE");
     if (!path || !runtime() || !runtime()->memory()) {
       return;

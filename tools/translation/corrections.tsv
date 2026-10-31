@@ -1,0 +1,29 @@
+# Corrections to official English lines of the Switch release, applied by make_map.py to the line of that ID
+# before conversion (each old text must occur in the line). Only actual errors the owner approved (2026-10-30);
+# awkward but correct lines are left as they are. Edited by espgaluda2-recomp.
+# switch_id	old	new
+XBOX_SCATK_TEXT_PLAY	Compete for high scores against your \nfriends for high scores.	Compete for high scores against your \nfriends.
+XBOX_MMENU_TEXT_SCATK	Compete for high scores against your\nfriends for high scores.	Compete for high scores against your\nfriends.
+XBOX_SYS_TEXT_22	areae	area
+XTEXT_Xbox360_11_20	you_STR_Y multiplier	your_STR_Y multiplier
+XTEXT_Black_10_03	on whole screen.	on the whole screen.
+XBOX_GOPT_TEXT_SAVE_NON	by starting user.	by the starting user.
+XBOX_TUT_TEXT_END	will be lost proceed?	will be lost. Proceed?
+XTEXT_Xbox360_11_20	Hint 5 Until	Hint 5: Until
+XTEXT_Black_21_06	_STR_Rabsolute.	_STR_Rabsolute
+XTEXT_Black_03_06	depleted,_STR_Rdead eye	depleted, _STR_Rdead eye
+XBOX_SYS_TEXT_35	file ?	file?
+XTEXT_Black_21_02	Dead Zone_STR_W,  that will automatically\n trigger	Dead Zone_STR_W, that will automatically\ntrigger
+XBOX_SYS_TEXT_16	\n creating	\ncreating
+XTEXT_Xbox360_11_10	\n_STR_W increases,	\n_STR_Wincreases,
+XTEXT_Black_03_09	\n (Except	\n(Except
+XBOX_STCG_TEXT_REPLAYSAVE	Change if to save	Change whether to save
+XTEXT_Black_20_05	have stronger rapier,	have stronger rapiers,
+XTEXT_Black_10_05	have stronger rapier,	have stronger rapiers,
+XBOX_GOPT_TEXT_SAVE_NON	Change storage settings\nCan	Change storage settings.\nCan
+XTEXT_Xbox360_12_13	Hint 4 When	Hint 4: When
+XTEXT_Xbox360_11_19	Hint 4 When	Hint 4: When
+XTEXT_Black_23_06	-When	- When
+XTEXT_Black_20_03	on whole screen.	on the whole screen.
+XTEXT_Black_20_02	_STR_Ddeath zone	_STR_Ddead zone
+XTEXT_Black_21_01	While _STR_DAscension _STR_RAbsolute _STR_DDeath Zone	While in _STR_DAscension _STR_RAbsolute _STR_DDead Zone
