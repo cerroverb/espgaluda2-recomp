@@ -29,8 +29,8 @@ decoder chip, and the SDK emulates that chip (FFmpeg does the decoding).
 
 Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
 futari-nx (the renderer port and its input-lag work), reNut (the Direct3D-level renderer), UnleashedRecomp (frame
-pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. This
-project was written with AI assistance. There is also a strict no machine generated media rule, so you will never see slop generated "art" or media in regards to any project I administer.
+pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
+assistance was used in the porting, but with strict instructions to simply port and retool unless bespoke changes were necessary, which were made under my direct supervision, review and testing. I am a programmer recompilation is not my specialty and is still something I am learning about, thus the LLM assistance. There is also a strict no machine generated media rule, so you will never see slop generated "art" or media in regards to any project I administer.
 
 ### Does this port reduce input lag?
 
