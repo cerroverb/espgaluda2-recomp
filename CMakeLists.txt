@@ -53,6 +53,15 @@ endif()
 
 include(generated/rexglue.cmake)
 
+# espgaluda2-recomp (2026-10-31): the English translation patch's how-to-play captions, one hook per mode module
+# (src/howto/howto_captions.inc).
+foreach(_mode dat00 dat11 dat12 dat15 dat162 dat163 dat164)
+    if(TARGET espgaluda2_recomp_${_mode})
+        target_sources(espgaluda2_recomp_${_mode} PRIVATE src/howto/howto_${_mode}.cpp)
+        target_include_directories(espgaluda2_recomp_${_mode} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    endif()
+endforeach()
+
 # extract-xiso, run on first launch to extract an ISO into game_data.
 include(FetchContent)
 FetchContent_Declare(extract_xiso
