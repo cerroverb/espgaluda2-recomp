@@ -66,6 +66,7 @@ jobs:
           mkdir -p $pkg/game_data
           cp -L $out/espgaluda2_recomp $out/*.so $pkg/
           cp -r $out/tools $pkg/
+          cp -r $out/translation $pkg/
           cp packaging/espgaluda2-recomp.sh packaging/README.txt LICENSE LICENSE-GPL-3.0 $pkg/
           chmod +x $pkg/espgaluda2-recomp.sh
           curl -sSfL -o $pkg/gamecontrollerdb.txt \
