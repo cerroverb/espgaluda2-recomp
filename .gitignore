@@ -29,3 +29,6 @@
 *.bak*
 __pycache__/
 __pycache__/
+
+# Local notes
+WORKLOG.md
