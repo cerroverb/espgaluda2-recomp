@@ -407,7 +407,7 @@ bool FromPresents(double nominal_ns) {
                          : fmt::format("{} us after it", delay_us));
   double last_refresh = 0;
   // espgaluda2-recomp (2026-10-29): ported from futari-linux 2026683 ("fall back to the timer when they do not follow a
-  // display"). Under a desktop compositor through XWayland (KWin on the Legion's NVIDIA) present wait reports when the
+  // display"). Under a desktop compositor through XWayland (KWin on an NVIDIA laptop) present wait reports when the
   // compositor took each image, not a refresh; those times follow the game's own presents, which follow this grid, so
   // the grid fed on itself and the game fell to 7 fps there. The vblanks of every 2 s are counted; a rate more than 3 %
   // away from the display's gives the vblank back to the timer.

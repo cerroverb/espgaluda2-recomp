@@ -1012,7 +1012,7 @@ void Video::BeginShutdown() {
   banjo::renut_gpu::BeforeDeviceDestroyed();  // banjo-nx: the pipeline cache's last save
   // espgaluda2-recomp (WORKLOG.md "Clean exit"): the swapchain and its framebuffers go now, while the window and its
   // Wayland/X11 connection still exist. Left to VideoState's static destructor they were destroyed after the window
-  // at process exit: a SIGSEGV in VulkanSwapChain's destructor here (gamescope's WSI layer), and on the Legion
+  // at process exit: a SIGSEGV in VulkanSwapChain's destructor here (gamescope's WSI layer), and on an NVIDIA laptop
   // "free(): corrupted unsorted chunks". The GPU is idle (WaitAllSubmitted above) and the render thread stopped.
   s.swap_framebuffers.clear();
   for (auto &retired : s.retired_framebuffers)
