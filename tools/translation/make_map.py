@@ -43,6 +43,7 @@ def to_xbox(text):
             out += part.encode("cp932")
     return out
 
+
 IMAGE_BASE = 0x82000000
 CORRECTIONS = __file__.rsplit("/", 1)[0] + "/corrections.tsv"
 OVERRIDES = __file__.rsplit("/", 1)[0] + "/overrides.tsv"
@@ -63,6 +64,13 @@ def table(path, encoding):
     return entries
 
 
+def rows_of(path):
+    # The tab-separated rows of one of the tools/translation tables, without comments and blank lines.
+    for line in open(path, encoding="utf-8"):
+        if not line.startswith("#") and line.strip():
+            yield line.rstrip("\n").split("\t")
+
+
 def readable(text):
     # A Switch line as readable text: line breaks as " / ", without colour and button codes.
     text = re.sub(r'\\[ab]?' + TOKENS + '|' + TOKENS, '', text).replace("\\a", "(A) ").replace("\\b", "(B) ")
@@ -80,20 +88,13 @@ def main():
     image = open(image_path, "rb").read()
     jp = table(jp_path, "cp932")
     en = table(en_path, "cp932")
-    # tools/translation/corrections.tsv: grammar and spelling fixes to official lines, by ID.
-    for line in open(CORRECTIONS, encoding="utf-8"):
-        if line.startswith("#") or not line.strip():
-            continue
-        key, old, new = line.rstrip("\n").split("\t")
+    # tools/translation/corrections.tsv: fixes of actual errors in official lines, by ID.
+    corrected = []
+    for key, old, new in rows_of(CORRECTIONS):
         if old not in en[key]:
             raise ValueError(f"correction for {key} does not apply: {old}")
         en[key] = en[key].replace(old, new)
-    changes = ["Corrected lines (the official Switch line, then the line shown):", ""]
-    for line in open(CORRECTIONS, encoding="utf-8"):
-        if line.startswith("#") or not line.strip():
-            continue
-        key, old, new = line.rstrip("\n").split("\t")
-        changes += [f"{key}", f"  was: {readable(old)}", f"  now: {readable(new)}", ""]
+        corrected += [key, f"  was: {readable(old)}", f"  now: {readable(new)}", ""]
     # Some entries of the English table are untranslated Japanese: an ID with English wins among IDs with the same
     # Japanese text, and a string with only Japanese ones is left as it is.
     index = {}
@@ -102,20 +103,21 @@ def main():
             index.setdefault(norm(value), key)
     # tools/translation/overrides.tsv: address, source ID, English (empty: the source ID's official line).
     overrides, adapted = {}, []
-    for line in open(OVERRIDES, encoding="utf-8"):
-        if line.startswith("#") or not line.strip():
-            continue
-        address, source, *text = line.rstrip("\n").split("\t")
-        overrides[int(address, 16)] = (source, text[0] if text and text[0] else en[source])
+    for address, source, *text in rows_of(OVERRIDES):
+        english = text[0] if text and text[0] else en[source]
+        overrides[int(address, 16)] = (source, english)
         if source.startswith("adapted:"):
-            adapted.append(f"{source[8:]}\n  now: {readable(overrides[int(address, 16)][1])}\n")
+            adapted.append(f"{source[8:]}\n  now: {readable(english)}\n")
     # The game's text is in the image's read-only data section (its PE section table).
     pe = struct.unpack_from("<I", image, 0x3C)[0]
     sections, optional = struct.unpack_from("<H", image, pe + 6)[0], struct.unpack_from("<H", image, pe + 20)[0]
+    begin = size = None
     for i in range(sections):
         section = pe + 24 + optional + 40 * i
         if image[section:section + 8].rstrip(b"\0") == b".rdata":
             size, begin = struct.unpack_from("<II", image, section + 8)
+    if begin is None:
+        raise ValueError("no .rdata section in " + image_path)
     rows, strings = [], 0
     for m in re.compile(rb'[^\x00]{4,}\x00').finditer(image, begin, begin + size):
         # A string can follow other data with no zero between (a float before XTEXT_Arrange_22_03's line): it starts
@@ -146,13 +148,16 @@ def main():
             end += 1
         in_data = 1 if struct.pack(">I", address) in image else 0
         rows.append((address, end - start, in_data, key, to_xbox(english)))
-    changes += ["Adapted lines (Xbox 360 messages the Switch has not, made from these official Switch lines):", ""]
-    changes_tail = ["Tutorial controller diagram labels (Japanese art, redrawn in the game's own English letters; the",
-                    "official Switch names of these buttons, from XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB):", "",
-                    "  ショット -> Shot", "  覚聖 -> Ascension", "  ガードバリア -> Guard Barrier",
-                    "  ショット連射 -> Rapid-fire Shot", ""]
+    # translation/CHANGES.txt: every line the patch shows that is not an official line as it is.
+    changes = (["Corrected lines (the official Switch line, then the line shown):", ""] + corrected +
+               ["Adapted lines (Xbox 360 messages the Switch has not, made from these official Switch lines):", ""] +
+               adapted + [""] +
+               ["Tutorial controller diagram labels (Japanese art, redrawn in the game's own English letters; the",
+                "official Switch names of these buttons, from XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB):", "",
+                "  ショット -> Shot", "  覚聖 -> Ascension", "  ガードバリア -> Guard Barrier",
+                "  ショット連射 -> Rapid-fire Shot", ""])
     with open(out_path.rsplit("/", 1)[0] + "/CHANGES.txt", "w", encoding="utf-8") as out:
-        out.write("\n".join(changes + adapted + [""] + changes_tail))
+        out.write("\n".join(changes))
     fit = sum(1 for r in rows if len(r[4]) + 1 <= r[1])
     moved = sum(1 for r in rows if len(r[4]) + 1 > r[1] and r[2])
     with open(out_path, "w") as out:

@@ -1,5 +1,6 @@
-// espgaluda2-recomp (2026-10-30, original code): the English translation patch: the official English text of the game's Switch release
-// (Live Wire / CAVE, 2021) in place of the Xbox 360 game's Japanese menus, messages and tutorials.
+// espgaluda2-recomp (2026-10-30, original code): the English translation patch: the official English text of the
+// game's Switch release (Live Wire / CAVE, 2021) in place of the Xbox 360 game's Japanese menus, messages and
+// tutorials.
 //
 // translation/english.tsv (tools/translation/make_map.py, from the Switch release's out_nx_jp.btxt / out_nx_en.btxt)
 // lists, per Japanese string of default.xex: its guest address, the bytes it may take in place, whether its address is
@@ -9,8 +10,8 @@
 // - a longer one whose address the image holds as a pointer is written to new guest memory and every such pointer
 //   outside the code section is pointed at it; the Japanese one stays where it was;
 // - every line also gets a copy in new guest memory, and the text drawer and measure hooks below swap a text pointer
-//   equal to an original string's address for its copy (psxrecomp's "pointer swap" method, docs/STRING_TRANSLATION.md; technique only),
-//   so lines reached only from code have no length limit either.
+//   equal to an original string's address for its copy (psxrecomp's "pointer swap" method,
+//   docs/STRING_TRANSLATION.md; technique only), so lines reached only from code have no length limit either.
 //
 // The game's dialog text drawer (sub_820A16A8) and its line-width measure (sub_820A15A0) take two bytes per
 // character and draw from the Japanese font pages only: a single-byte letter matches none of their cases and is
@@ -42,8 +43,8 @@ extern "C" REX_FUNC(__imp__sub_820A15A0);
 extern "C" REX_FUNC(sub_820A27A0);
 
 REXCVAR_DEFINE_BOOL(translation_patch, true, "Espgaluda2",
-                    "English translation patch: the menus, messages and tutorials in the official English of the game's "
-                    "Switch release (off: the Xbox 360 original's Japanese). Applies at the next launch")
+                    "English translation patch: the menus, messages and tutorials in the official English of the "
+                    "game's Switch release (off: the Xbox 360 original's Japanese). Applies at the next launch")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace espgaluda2::translation {
@@ -73,7 +74,8 @@ std::vector<Line> Load(const std::filesystem::path& path) {
     line.capacity = uint32_t(std::stoul(capacity));
     line.in_data = in_data == "1";
     line.id = id;
-    for (size_t i = 0; i + 1 < hex.size(); i += 2) line.bytes.push_back(uint8_t(std::stoul(hex.substr(i, 2), nullptr, 16)));
+    for (size_t i = 0; i + 1 < hex.size(); i += 2)
+      line.bytes.push_back(uint8_t(std::stoul(hex.substr(i, 2), nullptr, 16)));
     lines.push_back(std::move(line));
   }
   return lines;
@@ -124,14 +126,16 @@ void Apply(rex::memory::Memory* memory, uint32_t image_base, uint32_t image_size
     if (wanted.count(value)) pointers[value].push_back(offset);
   }
 
-  // The image's read-only data is write-protected; open the whole image while writing.
+  // The image's read-only data is write-protected: the whole image is made writable, and stays so (its sections'
+  // protections differ, and the game relies on no write fault there).
   memory->LookupHeap(image_base)->Protect(image_base, image_size,
                                            rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
   uint32_t in_place = 0, moved = 0, kept = 0;
   g_scratch = memory->SystemHeapAlloc(kScratchSize);
   for (const Line& line : lines) {
     const uint32_t needed = uint32_t(line.bytes.size()) + 1;
-    if (const uint32_t copy = memory->SystemHeapAlloc(needed)) {
+    const uint32_t copy = memory->SystemHeapAlloc(needed);
+    if (copy) {
       uint8_t* at = memory->TranslateVirtual<uint8_t*>(copy);
       std::memcpy(at, line.bytes.data(), line.bytes.size());
       at[line.bytes.size()] = 0;
@@ -142,15 +146,7 @@ void Apply(rex::memory::Memory* memory, uint32_t image_base, uint32_t image_size
       std::memcpy(at, line.bytes.data(), line.bytes.size());
       std::memset(at + line.bytes.size(), 0, line.capacity - line.bytes.size());
       ++in_place;
-    } else if (line.in_data && pointers.count(line.address)) {
-      const uint32_t copy = memory->SystemHeapAlloc(needed);
-      if (!copy) {
-        ++kept;
-        continue;
-      }
-      uint8_t* at = memory->TranslateVirtual<uint8_t*>(copy);
-      std::memcpy(at, line.bytes.data(), line.bytes.size());
-      at[line.bytes.size()] = 0;
+    } else if (copy && line.in_data && pointers.count(line.address)) {
       for (uint32_t offset : pointers[line.address]) {
         image[offset] = uint8_t(copy >> 24);
         image[offset + 1] = uint8_t(copy >> 16);
@@ -208,27 +204,6 @@ std::vector<float> LineWidths(uint8_t* base, uint32_t text) {
   return widths;
 }
 
-// Logs once each line still drawn with Japanese in it (a string the table does not cover), for testing coverage.
-void LogJapanese(uint8_t* base, uint32_t text) {
-  static std::unordered_map<uint32_t, bool> seen;
-  if (!text || g_swap.empty() || seen.count(text)) return;
-  seen[text] = true;
-  std::string bytes;
-  for (uint32_t i = 0; i < 512; ++i) {
-    const uint8_t c = REX_LOAD_U8(text + i);
-    if (!c) break;
-    bytes += char(c);
-  }
-  for (size_t i = 0; i < bytes.size(); ++i) {
-    if (IsLead(uint8_t(bytes[i])) && uint8_t(bytes[i]) != 0x81) {  // kana or kanji (0x81: signs and spaces)
-      std::string hex;
-      for (uint8_t c : bytes) hex += fmt::format("{:02x}", c);
-      REXLOG_INFO("[translation] Japanese line drawn from {:08X}: {}", text, hex);
-      return;
-    }
-  }
-}
-
 void StoreFloat(uint8_t* base, uint32_t address, float value) {
   uint32_t bits;
   std::memcpy(&bits, &value, 4);
@@ -263,7 +238,6 @@ extern "C" REX_FUNC(sub_820A15A0) {
 // stack: [r1+84] final x out, [r1+92] "ended with a line break" out; f1 = the final y.
 extern "C" REX_FUNC(sub_820A16A8) {
   ctx.r6.u64 = Swapped(ctx.r6.u32);
-  LogJapanese(base, ctx.r6.u32);
   if (!g_scratch || !HasLetters(base, ctx.r6.u32)) {
     __imp__sub_820A16A8(ctx, base);
     return;
@@ -462,10 +436,10 @@ std::vector<Texel> Line(const std::string& text, float scale, int& width) {
 bool TextureLabelsEnabled() { return REXCVAR_GET(translation_patch); }
 
 void EnglishTextureLabels(uint64_t hash, uint8_t* texels, uint32_t width, uint32_t height, uint32_t row_pitch) {
-  if (!REXCVAR_GET(translation_patch)) return;
   if (hash == kFontTextureHash && width == 512 && height == 512) {
     g_font.resize(size_t(512) * 512 * 4);
-    for (uint32_t y = 0; y < 512; ++y) std::memcpy(&g_font[size_t(y) * 512 * 4], texels + size_t(y) * row_pitch, 512 * 4);
+    for (uint32_t y = 0; y < 512; ++y)
+      std::memcpy(&g_font[size_t(y) * 512 * 4], texels + size_t(y) * row_pitch, 512 * 4);
     return;
   }
   if (hash != kLabelTextureHash || width != 1024 || height != 1024) return;
@@ -477,7 +451,8 @@ void EnglishTextureLabels(uint64_t hash, uint8_t* texels, uint32_t width, uint32
     int x;
     std::vector<std::string> lines;
   };
-  const Label labels[] = {{16, {"Shot"}}, {80, {"Ascension"}}, {144, {"Guard", "Barrier"}}, {208, {"Rapid-fire", "Shot"}}};
+  const Label labels[] = {
+      {16, {"Shot"}}, {80, {"Ascension"}}, {144, {"Guard", "Barrier"}}, {208, {"Rapid-fire", "Shot"}}};
   constexpr int kTop = 432, kWidth = 48;
   for (const Label& label : labels) {
     for (int y = kTop; y < kTop + 16 * int(label.lines.size()); ++y)

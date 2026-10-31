@@ -1,13 +1,15 @@
 // espgaluda2-recomp (2026-10-31, original code): the English translation patch for the "how to play" captions shown
-// after character select, before the first stage, in every mode. Included by one howto_datNN.cpp per mode module,
-// which defines the module's addresses (found in its generated code):
-//   HOWTO_DRAWER  the caption drawer (draws the 4 x 13 grid of glyph sprites)    HOWTO_SPRITE  its sprite call
-//   HOWTO_STATE   the caption state (+4: 52 u32 grid cells = glyph cell + 412; +214: u16 script index)
-//   HOWTO_SCRIPT  the caption script (u16 big-endian ops; text op: 0, delay, count, speed, column, line, glyphs...)
+// after character select, before the first stage (Arcade, Xbox 360, Xbox 360 Novice and Omake play it). Included by
+// one howto_datNN.cpp per mode module, which defines the module's addresses (found in its generated code):
+//   HOWTO_DRAWER_NAME  the caption drawer (draws the 4 x 13 grid of glyph sprites)    HOWTO_SPRITE  its sprite call
+//   HOWTO_STATE        the caption state (+4: 52 u32 grid cells = glyph cell + 412; +214: u16 script index)
+//   HOWTO_SCRIPT       the caption script (u16 big-endian ops; text op: 0, delay, count, speed, column, line, glyphs)
+//   HOWTO_HD           defined for the modules whose caption sheet has the larger letters (Xbox 360 modes)
 // The game types each caption into the grid one glyph a step, 16 px a glyph. With the patch on, the drawer hook finds
 // which caption the grid holds (its glyphs against the script's), and draws that caption's English instead, typed in
 // step with the Japanese (the same share of its letters), with the caption font's own Latin letters at their own
-// widths (16 px cells, ink measured from the font sheet), word-wrapped to the box (x 30..238, 4 lines). The script,
+// widths (16-unit cells; ink measured from the sheet, or on screen for the Xbox 360 modes' sheet), word-wrapped to the
+// box (x 30..238, 4 lines), letters set up to 3 units closer when a caption needs it to fit. The script,
 // its timing and the art are unchanged; with the patch off the original drawer runs.
 #include "espgaluda2_recomp_init.h"
 
@@ -17,6 +19,9 @@
 #include <vector>
 
 #include <rex/cvar.h>
+
+#define HOWTO_IMP(name) HOWTO_IMP2(name)
+#define HOWTO_IMP2(name) __imp__##name
 
 extern "C" REX_FUNC(HOWTO_IMP(HOWTO_DRAWER_NAME));
 
@@ -46,6 +51,7 @@ const char* const kEnglish[] = {
     "Release it to fire a guard barrier attack as strong as you held it.",
 };
 constexpr int kCaptions = int(sizeof(kEnglish) / sizeof(kEnglish[0]));
+constexpr uint16_t kSheetCells = 344;  // the caption font sheet's cells (its last kanji row ends at 344)
 
 #ifdef HOWTO_HD
 constexpr bool kHd = true;
@@ -59,8 +65,8 @@ struct Glyph {
   int width = 0;  // advance
 };
 
-// The caption font sheet: 'A'..'Z' cells 1..26, 'a'..'n' 34..47, 'o'..'z' 48..59; ',' 257, '.' 258, '!' 262. Ink columns
-// measured from the sheet (in the mode's texture atlas).
+// The caption font sheet: 'A'..'Z' cells 1..26, 'a'..'n' 34..47, 'o'..'z' 48..59; ',' 257, '.' 258, '!' 262. Ink
+// columns measured from the sheet (in the mode's texture atlas).
 Glyph Lookup(char c) {
   static const uint8_t upper[26][2] = {{1, 11}, {1, 11}, {1, 11}, {0, 11}, {1, 11}, {1, 11}, {1, 12}, {0, 12}, {4, 8},
                                        {2, 9},  {0, 12}, {1, 11}, {0, 12}, {0, 12}, {0, 11}, {1, 11}, {0, 12}, {1, 11},
@@ -70,12 +76,14 @@ Glyph Lookup(char c) {
                                        {2, 9},  {3, 10}, {1, 11}, {1, 10}, {0, 11}, {1, 11}, {1, 12}, {2, 12}};
   // The Xbox 360 modes' sheet (HOWTO_HD: dat12, dat163) draws the same cells with other letter shapes; their ink was
   // measured on screen (every letter in its own cell), in the same 16-unit cell.
-  static const int8_t upper_hd[26][2] = {{3, 14}, {3, 13}, {2, 13}, {2, 13}, {3, 13}, {4, 13}, {3, 14}, {2, 14}, {6, 10},
-                                         {4, 10}, {3, 14}, {4, 13}, {1, 15}, {2, 14}, {2, 14}, {3, 13}, {2, 14}, {3, 14},
-                                         {3, 13}, {2, 13}, {3, 13}, {2, 14}, {0, 16}, {0, 14}, {2, 14}, {3, 13}};
-  static const int8_t lower_hd[26][2] = {{1, 14}, {1, 15}, {2, 14}, {1, 15}, {1, 14}, {4, 13}, {1, 15}, {1, 15}, {5, 10},
-                                         {2, 10}, {1, 15}, {5, 10}, {0, 16}, {0, 15}, {1, 15}, {0, 15}, {1, 16}, {3, 14},
-                                         {2, 14}, {3, 12}, {1, 15}, {1, 15}, {0, 15}, {1, 14}, {1, 15}, {1, 14}};
+  static const int8_t upper_hd[26][2] = {{3, 14}, {3, 13}, {2, 13}, {2, 13}, {3, 13}, {4, 13}, {3, 14}, {2, 14},
+                                         {6, 10}, {4, 10}, {3, 14}, {4, 13}, {1, 15}, {2, 14}, {2, 14}, {3, 13},
+                                         {2, 14}, {3, 14}, {3, 13}, {2, 13}, {3, 13}, {2, 14}, {0, 16}, {0, 14},
+                                         {2, 14}, {3, 13}};
+  static const int8_t lower_hd[26][2] = {{1, 14}, {1, 15}, {2, 14}, {1, 15}, {1, 14}, {4, 13}, {1, 15}, {1, 15},
+                                         {5, 10}, {2, 10}, {1, 15}, {5, 10}, {0, 16}, {0, 15}, {1, 15}, {0, 15},
+                                         {1, 16}, {3, 14}, {2, 14}, {3, 12}, {1, 15}, {1, 15}, {0, 15}, {1, 14},
+                                         {1, 15}, {1, 14}};
   Glyph g;
   if (c >= 'A' && c <= 'Z') {
     g.cell = 1 + (c - 'A');
@@ -151,7 +159,7 @@ void Parse(uint8_t* base) {
     const uint32_t a = HOWTO_SCRIPT + i * 2;
     const uint16_t op = REX_LOAD_U16(a), n = REX_LOAD_U16(a + 4), line = REX_LOAD_U16(a + 10);
     bool text = op == 0 && n >= 1 && n <= 13 && line <= 3;
-    for (uint32_t k = 0; text && k < n; ++k) text = REX_LOAD_U16(a + 12 + 2 * k) < 344;
+    for (uint32_t k = 0; text && k < n; ++k) text = REX_LOAD_U16(a + 12 + 2 * k) < kSheetCells;
     if (!text) {
       ++i;
       continue;
@@ -206,7 +214,8 @@ extern "C" REX_FUNC(HOWTO_DRAWER_NAME) {
       typed += v ? 1 : 0;
     }
   if (typed == 0) return;
-  // The caption it holds: the latest (by script position) whose glyphs agree with every typed cell.
+  // The caption it holds: one whose glyphs agree with every typed cell (the latest the script has reached, should two
+  // agree while only their common start is typed).
   const uint32_t index = REX_LOAD_U16(HOWTO_STATE + 214);
   int found = -1;
   for (int k = 0; k < int(g_captions.size()); ++k) {
