@@ -75,7 +75,7 @@ those games share with this one still needs checking.
 
 Now that input latency and performance are in a good place, version 1.2.0 adds an English translation patch for the menus, messages and tutorials. The text is sourced from the official English of the Switch release. Where the Xbox 360 version has messages the Switch does not (Xbox LIVE, storage devices, Achievements), the closest official Switch lines are adapted. The tutorial's Japanese button labels are redrawn using the game's own English font. A few obvious errors in the official text are corrected, and every change is listed in a file that ships with the patch. The patch is on by default and can be turned off in the settings (`translation_patch`) to play with the original Japanese text.
 
-Still in Japanese, and next on the list: the how-to-play captions shown after character select, before the first stage.
+Version 1.2.1 adds English how-to-play captions (shown after character select, before the first stage) and clearer tutorial button labels.
 
 ## Status
 
