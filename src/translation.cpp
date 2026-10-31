@@ -348,10 +348,11 @@ namespace espgaluda2::translation {
 // (default.xex data 0x82380C0C..: x 16 / 80 / 144 / 208, y 432, 48 wide, 16 or 32 high). With the patch on, the
 // renderer hands each 4-byte texture it uploads to EnglishTextureLabels (renut textures.cpp); the interface texture
 // (identified by the XXH3 of its level 0) gets those rectangles redrawn with the official Switch English button names
-// (XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB: shot, Ascension, guard barrier, rapid-fire shot), in the game's
-// own ASCII font (the 16x32 cells of xbox_sys_01, kept from that texture's own upload) at half size, area-averaged,
-// narrowed to the 48 pixels a line has where needed. Bytes per texel: three colour bytes (each treated alike), then
-// alpha.
+// (XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB: shot, Ascension, guard barrier, rapid-fire shot, the last
+// shortened to "Rapid Shot" to fit), in the game's own ASCII font (the 16x32 cells of xbox_sys_01, kept from that
+// texture's own upload) at half size, area-averaged, its lowercase narrowed where a line needs it to fit 48 pixels,
+// then made bolder (Embolden). Bytes per texel: three
+// colour bytes (each treated alike), then alpha.
 namespace {
 
 constexpr uint64_t kFontTextureHash = 0x53F7F18595878C11ull;  // xbox_sys_01 (512x512, the ASCII font)
@@ -390,18 +391,19 @@ std::vector<Texel> Glyph(char ch, int width) {
   return out;
 }
 
-// A line of text at half the font's size (advance 8.5, 7.5 for ',' and '.', 8 a space) scaled by 'scale' in x,
-// cropped to its ink.
+// A line of text at half the font's size (advance 8.5, 7.5 for ',' and '.', 8 a space), all but its capitals scaled
+// by 'scale' in x (a narrowed capital such as R or A loses its shape first), cropped to its ink.
 std::vector<Texel> Line(const std::string& text, float scale, int& width) {
   auto advance = [](char c) { return c == ' ' ? 8.0f : (c == ',' || c == '.') ? 7.5f : 8.5f; };
+  auto scale_of = [scale](char c) { return c >= 'A' && c <= 'Z' ? 1.0f : scale; };
   float total = 0;
-  for (char c : text) total += advance(c);
-  const int canvas = int(std::ceil(total * scale)) + 10;
+  for (char c : text) total += advance(c) * scale_of(c);
+  const int canvas = int(std::ceil(total)) + 10;
   std::vector<Texel> out(size_t(canvas) * 16);
   float x = 0;
   for (char c : text) {
     if (c != ' ') {
-      const int gw = std::max(1, int(std::lround(8 * scale + 0.4f)));
+      const int gw = std::max(1, int(std::lround(8 * scale_of(c) + 0.4f)));
       const std::vector<Texel> g = Glyph(c, gw);
       const int xi = int(std::lround(x));
       for (int y = 0; y < 16; ++y) {
@@ -414,7 +416,7 @@ std::vector<Texel> Line(const std::string& text, float scale, int& width) {
         }
       }
     }
-    x += advance(c) * scale;
+    x += advance(c) * scale_of(c);
   }
   int first = canvas, last = -1;
   for (int cx = 0; cx < canvas; ++cx)
@@ -429,6 +431,50 @@ std::vector<Texel> Line(const std::string& text, float scale, int& width) {
   for (int y = 0; y < 16; ++y)
     for (int cx = 0; cx < width; ++cx) cropped[size_t(y) * width + cx] = out[size_t(y) * canvas + first + cx];
   return cropped;
+}
+
+// The line of 'text' that fits 'limit' texels: as it is, or with its lowercase narrowed as little as needed.
+std::vector<Texel> FittedLine(const std::string& text, int limit, int& width) {
+  std::vector<Texel> line = Line(text, 1.0f, width);
+  if (width <= limit) return line;
+  float lo = 0.2f, hi = 1.0f;
+  for (int i = 0; i < 20; ++i) {
+    const float mid = (lo + hi) / 2;
+    int w = 0;
+    Line(text, mid, w);
+    (w <= limit ? lo : hi) = mid;
+  }
+  return Line(text, lo, width);
+}
+
+// Bolder letters (the labels are small and on a darkened panel): the line drawn twice, one texel apart, over its
+// outline grown one texel each way in the font's own outline colour. Widens the line by 3 texels.
+std::vector<Texel> Embolden(const std::vector<Texel>& in, int& width) {
+  const int w = width + 3;
+  auto over = [](Texel& d, const Texel& s) {
+    const float a = s.a + d.a * (1 - s.a);
+    for (int k = 0; k < 3; ++k) d.c[k] = a > 0 ? (s.c[k] * s.a + d.c[k] * d.a * (1 - s.a)) / a : 0;
+    d.a = a;
+  };
+  std::vector<Texel> bold(size_t(w) * 16);  // the line at x + 1, then at x + 2 over it
+  for (int shift = 1; shift <= 2; ++shift)
+    for (int y = 0; y < 16; ++y)
+      for (int x = 0; x < width; ++x) over(bold[size_t(y) * w + x + shift], in[size_t(y) * width + x]);
+  constexpr float kOutline = 49.0f / 255.0f;
+  const int dx[] = {0, 1, -1, 0, 0}, dy[] = {0, 0, 0, 1, -1};
+  std::vector<Texel> out(size_t(w) * 16);
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < w; ++x) {
+      Texel& o = out[size_t(y) * w + x];
+      for (int k = 0; k < 5; ++k) {
+        const int nx = x + dx[k], ny = y + dy[k];
+        if (nx >= 0 && nx < w && ny >= 0 && ny < 16) o.a = std::max(o.a, bold[size_t(ny) * w + nx].a);
+      }
+      for (int k = 0; k < 3; ++k) o.c[k] = kOutline;
+      over(o, bold[size_t(y) * w + x]);
+    }
+  width = w;
+  return out;
 }
 
 }  // namespace
@@ -452,15 +498,14 @@ void EnglishTextureLabels(uint64_t hash, uint8_t* texels, uint32_t width, uint32
     std::vector<std::string> lines;
   };
   const Label labels[] = {
-      {16, {"Shot"}}, {80, {"Ascension"}}, {144, {"Guard", "Barrier"}}, {208, {"Rapid-fire", "Shot"}}};
+      {16, {"Shot"}}, {80, {"Ascension"}}, {144, {"Guard", "Barrier"}}, {208, {"Rapid", "Shot"}}};
   constexpr int kTop = 432, kWidth = 48;
   for (const Label& label : labels) {
     for (int y = kTop; y < kTop + 16 * int(label.lines.size()); ++y)
       std::memset(texels + size_t(y) * row_pitch + size_t(label.x) * 4, 0, kWidth * 4);
     for (size_t k = 0; k < label.lines.size(); ++k) {
       int w = 0;
-      std::vector<Texel> line = Line(label.lines[k], 1.0f, w);
-      if (w > kWidth - 2) line = Line(label.lines[k], float(kWidth - 2) / float(w), w);
+      std::vector<Texel> line = Embolden(FittedLine(label.lines[k], kWidth - 5, w), w);
       const int x0 = label.x + (kWidth - w) / 2, y0 = kTop + 16 * int(k);
       for (int y = 0; y < 16; ++y) {
         for (int x = 0; x < w; ++x) {

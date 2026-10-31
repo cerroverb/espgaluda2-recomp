@@ -19,6 +19,7 @@ What was changed and why
 
 - The tutorial's controller diagram labels its buttons in Japanese art (the Switch release left them in Japanese
   too). With the patch on they are redrawn, as the game loads that picture, in the game's own English letters with
-  the official Switch names of those buttons: Shot, Ascension, Guard Barrier, Rapid-fire Shot.
+  the official Switch names of those buttons: Shot, Ascension, Guard Barrier and Rapid Shot (shortened from
+  "rapid-fire shot" to fit its label).
 
 No game files are included. Other pictures that contain Japanese text (parts of the game's art) are not changed.

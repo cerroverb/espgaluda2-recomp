@@ -153,9 +153,10 @@ def main():
                ["Adapted lines (Xbox 360 messages the Switch has not, made from these official Switch lines):", ""] +
                adapted + [""] +
                ["Tutorial controller diagram labels (Japanese art, redrawn in the game's own English letters; the",
-                "official Switch names of these buttons, from XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB):", "",
+                "official Switch names of these buttons, from XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB, except",
+                "\"rapid-fire shot\", shortened to \"Rapid Shot\" to fit its label):", "",
                 "  ショット -> Shot", "  覚聖 -> Ascension", "  ガードバリア -> Guard Barrier",
-                "  ショット連射 -> Rapid-fire Shot", ""])
+                "  ショット連射 -> Rapid Shot", ""])
     with open(out_path.rsplit("/", 1)[0] + "/CHANGES.txt", "w", encoding="utf-8") as out:
         out.write("\n".join(changes))
     fit = sum(1 for r in rows if len(r[4]) + 1 <= r[1])
