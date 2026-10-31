@@ -4,6 +4,8 @@
  */
 #include "renut_engine/gpu/render/textures.h"
 
+#include "translation.h"
+
 #include <rex/cvar.h>
 
 #include <algorithm>
@@ -420,6 +422,20 @@ struct PendingFill {
 };
 std::vector<PendingFill> g_pending_fills;
 
+// espgaluda2-recomp (2026-10-30): the English translation patch redraws the tutorial controller diagram's labels in
+// the texture holding them (src/translation.cpp); only square 512 / 1024 texel 4-byte textures can be the ones it
+// needs, so only those are hashed.
+void PatchTexels(const TextureFormatInfo &info, uint32_t blocks_w, uint32_t blocks_h, uint32_t depth, uint8_t *dst,
+                 uint32_t row_pitch) {
+  if (info.block_size != 1 || info.host_block_bytes != 4 || depth != 1 || blocks_w != blocks_h ||
+      (blocks_w != 512 && blocks_w != 1024) || row_pitch != blocks_w * 4)
+    return;
+  if (!espgaluda2::translation::TextureLabelsEnabled())
+    return;
+  const uint64_t hash = XXH3_64bits(dst, size_t(row_pitch) * blocks_h);
+  espgaluda2::translation::EnglishTextureLabels(hash, dst, blocks_w, blocks_h, row_pitch);
+}
+
 // Records the copies of every level into 't'. The guest data is read now, or
 // when the command list is submitted if 'defer_read'.
 bool Upload(HostTexture &t, const TextureFetch &fetch, bool defer_read) {
@@ -479,10 +495,12 @@ bool Upload(HostTexture &t, const TextureFetch &fetch, bool defer_read) {
       if (!staging)
         return false;
       auto *dst = static_cast<uint8_t *>(staging.cpu);
-      if (defer_read)
+      if (defer_read) {
         g_pending_fills.push_back({t.info, fetch, src, blocks_w, blocks_h, d, dst, row_pitch, slice_pitch});
-      else
+      } else {
         ReadLevel(t.info, fetch, src, blocks_w, blocks_h, d, dst, row_pitch, slice_pitch);
+        PatchTexels(t.info, blocks_w, blocks_h, d, dst, row_pitch);
+      }
       // Footprints are in texels, block-aligned for compressed formats. Decoded
       // blocks are plain texels, so a level smaller than a block (a small mip)
       // takes only its own part of the decoded block.
@@ -1108,6 +1126,7 @@ void FlushTextureFillsLocked() {
   for (const PendingFill &f : g_pending_fills) {
     ReadLevel(f.info, f.fetch, f.src, f.blocks_w, f.blocks_h, f.depth, f.dst, f.row_pitch,
               f.slice_pitch);
+    PatchTexels(f.info, f.blocks_w, f.blocks_h, f.depth, f.dst, f.row_pitch);
   }
   g_pending_fills.clear();
 }

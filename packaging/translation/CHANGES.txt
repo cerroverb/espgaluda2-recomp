@@ -1,0 +1,199 @@
+Corrected lines (the official Switch line, then the line shown):
+
+XBOX_SCATK_TEXT_PLAY
+  was: Compete for high scores against your / friends for high scores.
+  now: Compete for high scores against your / friends.
+
+XBOX_MMENU_TEXT_SCATK
+  was: Compete for high scores against your / friends for high scores.
+  now: Compete for high scores against your / friends.
+
+XBOX_SYS_TEXT_22
+  was: areae
+  now: area
+
+XTEXT_Xbox360_11_20
+  was: you multiplier
+  now: your multiplier
+
+XTEXT_Black_10_03
+  was: on whole screen.
+  now: on the whole screen.
+
+XBOX_GOPT_TEXT_SAVE_NON
+  was: by starting user.
+  now: by the starting user.
+
+XBOX_TUT_TEXT_END
+  was: will be lost proceed?
+  now: will be lost. Proceed?
+
+XTEXT_Xbox360_11_20
+  was: Hint 5 Until
+  now: Hint 5: Until
+
+XTEXT_Black_21_06
+  was: absolute.
+  now: absolute
+
+XTEXT_Black_03_06
+  was: depleted,dead eye
+  now: depleted, dead eye
+
+XBOX_SYS_TEXT_35
+  was: file ?
+  now: file?
+
+XTEXT_Black_21_02
+  was: Dead Zone,  that will automatically / trigger
+  now: Dead Zone, that will automatically / trigger
+
+XBOX_SYS_TEXT_16
+  was: creating
+  now: creating
+
+XTEXT_Xbox360_11_10
+  was: increases,
+  now: increases,
+
+XTEXT_Black_03_09
+  was: (Except
+  now: (Except
+
+XBOX_STCG_TEXT_REPLAYSAVE
+  was: Change if to save
+  now: Change whether to save
+
+XTEXT_Black_20_05
+  was: have stronger rapier,
+  now: have stronger rapiers,
+
+XTEXT_Black_10_05
+  was: have stronger rapier,
+  now: have stronger rapiers,
+
+XBOX_GOPT_TEXT_SAVE_NON
+  was: Change storage settings / Can
+  now: Change storage settings. / Can
+
+XTEXT_Xbox360_12_13
+  was: Hint 4 When
+  now: Hint 4: When
+
+XTEXT_Xbox360_11_19
+  was: Hint 4 When
+  now: Hint 4: When
+
+XTEXT_Black_23_06
+  was: -When
+  now: - When
+
+XTEXT_Black_20_03
+  was: on whole screen.
+  now: on the whole screen.
+
+XTEXT_Black_20_02
+  was: death zone
+  now: dead zone
+
+XTEXT_Black_21_01
+  was: While Ascension Absolute Death Zone
+  now: While in Ascension Absolute Dead Zone
+
+Adapted lines (Xbox 360 messages the Switch has not, made from these official Switch lines):
+
+XBOX_TEMPMSG_TEXT_XBOXLIVE_DISCONNECT
+  now: Disconnected from Xbox LIVE.
+
+XBOX_XLIVE_SCR_REGIST_00
+  now: Connecting to Xbox LIVE
+
+XBOX_PAUSE_TEXT_RET_MENU
+  now: Quit the game and return to the / previous menu.
+
+XBOX_PAUSE_TEXT_RESTART,XBOX_GCFG_TEXT_CHECK
+  now: You will restart this stage from the beginning. / Scores, replays and Achievements are disabled.
+
+XBOX_SYS_TEXT_08,XBOX_REPLAY_TEXT_B2
+  now: Not enough space available to create / system file. Select another storage device? /  / (A) YES    (B) NO
+
+XBOX_SYS_TEXT_39
+  now: Saving system file. / Please do not turn off the Power.
+
+XBOX_SYS_TEXT_41,XBOX_SYS_TEXT_1D
+  now: The storage device selected does not exist. / Change storage device and save system file? /  / (A) YES    (B) NO
+
+XBOX_SYS_TEXT_32,XBOX_REPLAY_TEXT_B2
+  now: Not enough space available to create / game data file. Select another storage device? /  / (A) YES    (B) NO
+
+XBOX_PAUSE_TEXT_RET_MENU_Q
+  now: This will quit the game and return / to the previous menu. Any unsaved / data will be lost. Is this okay? /  / (A) YES    (B) NO
+
+XBOX_SYS_TEXT_71,XBOX_SYS_TEXT_9A
+  now: Preparing to save. / Please do not turn off the Power / or remove the storage device.
+
+XBOX_XLIMSG_TEXT_DATAGET_ERROR,XBOX_MMENU_TEXT_LB_WARNING
+  now: Failed to obtain ranking data. / To access ranking you / must sign into Xbox LIVE. /  / (A) OK
+
+XBOX_XLIMSG_TEXT_DISCONNECT,XBOX_SCATK_TEXT_EXIT
+  now: Disconnected from Xbox LIVE. / Returning to the Main Menu. /  / (A) OK
+
+XBOX_TMENU_TEXT_XB
+  now: Select Xbox 360 Mode Tutorial.
+
+XBOX_PAUSE_TEXT_OPTION
+  now: Change settings.
+
+XBOX_MMENU_TEXT_SCATK_WARNING
+  now: In order to enter Score Attack Mode / you must sign into Xbox LIVE. /  / (A) OK
+
+XBOX_SYS_TEXT_50,XBOX_SYS_TEXT_9A
+  now: Reading game data. / Please do not turn off the Power / or remove the storage device.
+
+XBOX_SYS_TEXT_01
+  now: You are not signed into a Gamer Profile. / Cannot save or load data / while signed out. / Start game anyway? /  / Gamer Profile can be selected by pressing / the Xbox Guide button. /  / (A) YES    (B) NO
+
+XBOX_GAME_TYPE_ARRANGE_2,XBOX_SGAME_TEXT_MUSOU
+  now: Play Omake! Mode.
+
+XBOX_SGAME_TEXT_BL_NOVICE_OFF
+  now: Play Xbox 360 Novice Mode.
+
+XBOX_SGAME_TEXT_BL_NOVICE_OFF
+  now: Play Black Label Novice Mode.
+
+XBOX_TRNSG_TEXT_BLACK
+  now: Play Black Label Mode.
+
+XBOX_SGAME_TEXT_BL_ARCADE_OFF
+  now: Play Arcade Mode.
+
+XBOX_SGAME_TEXT_MUSOU
+  now: Play Xbox 360 Mode.
+
+XBOX_C_PAUSE_TEXT_RET_MENU
+  now: Play a Player Match / in Xbox 360 Mode.
+
+XBOX_C_PAUSE_TEXT_RET_MENU
+  now: Play a Player Match / in Arcade Mode.
+
+XBOX_SYS_TEXT_92,XBOX_SYS_TEXT_9A
+  now: Reading replay data. / Please do not turn off the Power / or remove the storage device.
+
+XBOX_SYS_TEXT_97
+  now: Deleting replay data. / Please do not remove the storage device.
+
+XBOX_SYS_TEXT_90,XBOX_SYS_TEXT_9A
+  now: Checking replay data. / Please do not turn off the Power / or remove the storage device.
+
+XBOX_STCG_TEXT_STORAGE_SEL_NON
+  now: Change storage device. / Please sign in to use this option.
+
+
+Tutorial controller diagram labels (Japanese art, redrawn in the game's own English letters; the
+official Switch names of these buttons, from XBOX_CCFG_TEXT_LSHOT / RSHOT / LOCKSHOT / BOMB):
+
+  ショット -> Shot
+  覚聖 -> Ascension
+  ガードバリア -> Guard Barrier
+  ショット連射 -> Rapid-fire Shot

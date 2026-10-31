@@ -1,0 +1,53 @@
+# English for the Xbox 360 strings whose Japanese differs from every line of the Switch release (make_map.py).
+# address	source	English (the Switch table's syntax: \n line break, \a / \b the A / B button glyph)
+# source: a Switch ID alone = that official English line as it is; "adapted:<IDs>" = the official lines of those IDs
+# with the Xbox 360 version's own terms (Xbox LIVE, storage device, Xbox Guide, Achievements, its mode names) where the
+# Switch has Steam, the internet or its own modes. Edited by espgaluda2-recomp (2026-10-30).
+82000F7C	adapted:XBOX_TEMPMSG_TEXT_XBOXLIVE_DISCONNECT	Disconnected from Xbox LIVE.
+82006FA0	adapted:XBOX_XLIVE_SCR_REGIST_00	Connecting to Xbox LIVE
+82007220	adapted:XBOX_PAUSE_TEXT_RET_MENU	Quit the game and return to the\nprevious menu.
+820088B8	XBOX_STCG_TEXT_REPLAYSAVE_NON
+82008910	XBOX_STCG_TEXT_REPLAYSAVE_NOSAVE
+82008970	XBOX_STCG_TEXT_AUTOSAVE_NON
+820089B8	XBOX_STCG_TEXT_AUTOSAVE_NOSAVE
+82008A90	adapted:XBOX_PAUSE_TEXT_RESTART,XBOX_GCFG_TEXT_CHECK	You will restart this stage from the beginning.\nScores, replays and Achievements are disabled.
+82008BA8	XBOX_SYS_TEXT_17
+82008C08	XBOX_SYS_TEXT_0C
+82008D28	adapted:XBOX_SYS_TEXT_08,XBOX_REPLAY_TEXT_B2	Not enough space available to create\nsystem file. Select another storage device?\n\n\aYES    \bNO
+82008E90	adapted:XBOX_SYS_TEXT_39	Saving system file.\nPlease do not turn off the Power.
+82008ED8	adapted:XBOX_SYS_TEXT_41,XBOX_SYS_TEXT_1D	The storage device selected does not exist.\nChange storage device and save system file?\n\n\aYES    \bNO
+82008FC8	XBOX_SYS_TEXT_10
+82009080	XBOX_SYS_TEXT_37
+82009140	adapted:XBOX_SYS_TEXT_32,XBOX_REPLAY_TEXT_B2	Not enough space available to create\ngame data file. Select another storage device?\n\n\aYES    \bNO
+82009268	XBOX_SYS_TEXT_39
+820092A8	XBOX_SYS_TEXT_41
+820094B8	XBOX_GCFG_TEXT_RANKING_CLEAR_Q
+82009710	XBOX_SYS_TEXT_21
+820097B0	adapted:XBOX_PAUSE_TEXT_RET_MENU_Q	This will quit the game and return\nto the previous menu. Any unsaved\ndata will be lost. Is this okay?\n\n\aYES    \bNO
+82009E40	XBOX_SYS_TEXT_77
+82009EB8	XBOX_REPLAY_TEXT_B2
+82009F98	XBOX_SYS_TEXT_79
+82009FE0	adapted:XBOX_SYS_TEXT_71,XBOX_SYS_TEXT_9A	Preparing to save.\nPlease do not turn off the Power\nor remove the storage device.
+8200A040	XBOX_SYS_TEXT_81
+8200A4A0	adapted:XBOX_XLIMSG_TEXT_DATAGET_ERROR,XBOX_MMENU_TEXT_LB_WARNING	Failed to obtain ranking data.\nTo access ranking you\nmust sign into Xbox LIVE.\n\n\aOK
+8200A528	adapted:XBOX_XLIMSG_TEXT_DISCONNECT,XBOX_SCATK_TEXT_EXIT	Disconnected from Xbox LIVE.\nReturning to the Main Menu.\n\n\aOK
+8200B160	adapted:XBOX_TMENU_TEXT_XB	Select Xbox 360 Mode Tutorial.
+8200B1EC	XBOX_LB_TEXT_LIST
+8200B254	adapted:XBOX_PAUSE_TEXT_OPTION	Change settings.
+8200B398	adapted:XBOX_MMENU_TEXT_SCATK_WARNING	In order to enter Score Attack Mode\nyou must sign into Xbox LIVE.\n\n\aOK
+8200B5B8	adapted:XBOX_SYS_TEXT_50,XBOX_SYS_TEXT_9A	Reading game data.\nPlease do not turn off the Power\nor remove the storage device.
+8200B948	adapted:XBOX_SYS_TEXT_01	You are not signed into a Gamer Profile.\nCannot save or load data\nwhile signed out.\nStart game anyway?\n\nGamer Profile can be selected by pressing\nthe Xbox Guide button.\n\n\aYES    \bNO
+8200BA5C	adapted:XBOX_GAME_TYPE_ARRANGE_2,XBOX_SGAME_TEXT_MUSOU	Play Omake! Mode.
+8200BA80	adapted:XBOX_SGAME_TEXT_BL_NOVICE_OFF	Play Xbox 360 Novice Mode.
+8200BAB4	adapted:XBOX_SGAME_TEXT_BL_NOVICE_OFF	Play Black Label Novice Mode.
+8200BAF0	adapted:XBOX_TRNSG_TEXT_BLACK	Play Black Label Mode.
+8200BB20	XBOX_SGAME_TEXT_ARRANGE_A
+8200BB40	adapted:XBOX_SGAME_TEXT_BL_ARCADE_OFF	Play Arcade Mode.
+8200BB64	adapted:XBOX_SGAME_TEXT_MUSOU	Play Xbox 360 Mode.
+8200BBB8	adapted:XBOX_C_PAUSE_TEXT_RET_MENU	Play a Player Match\nin Xbox 360 Mode.
+8200BBEC	adapted:XBOX_C_PAUSE_TEXT_RET_MENU	Play a Player Match\nin Arcade Mode.
+8200BDD0	adapted:XBOX_SYS_TEXT_92,XBOX_SYS_TEXT_9A	Reading replay data.\nPlease do not turn off the Power\nor remove the storage device.
+8200BEA0	adapted:XBOX_SYS_TEXT_97	Deleting replay data.\nPlease do not remove the storage device.
+8200C048	adapted:XBOX_SYS_TEXT_90,XBOX_SYS_TEXT_9A	Checking replay data.\nPlease do not turn off the Power\nor remove the storage device.
+8200C1A4	XBOX_TRNG_TEXT_EXIT
+82008858	adapted:XBOX_STCG_TEXT_STORAGE_SEL_NON	Change storage device.\nPlease sign in to use this option.

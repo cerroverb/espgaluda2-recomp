@@ -73,7 +73,9 @@ those games share with this one still needs checking.
 
 ### What's next for this project?
 
-Now that input latency and performance are in a good place, I'm working on an English translation patch for the menus, messages and tutorials. The text is sourced from the official English of the Switch release. Where the Xbox 360 version has messages the Switch does not (Xbox LIVE, storage devices, Achievements), the closest official Switch lines are adapted. The tutorial's Japanese button labels are redrawn using the game's own English font. A few obvious errors in the official text are corrected, and every change is listed in a file that ships with the patch. The patch is optional and can be turned off in the settings to play with the original Japanese text. It will be released shortly.
+Now that input latency and performance are in a good place, version 1.2.0 adds an English translation patch for the menus, messages and tutorials. The text is sourced from the official English of the Switch release. Where the Xbox 360 version has messages the Switch does not (Xbox LIVE, storage devices, Achievements), the closest official Switch lines are adapted. The tutorial's Japanese button labels are redrawn using the game's own English font. A few obvious errors in the official text are corrected, and every change is listed in a file that ships with the patch. The patch is on by default and can be turned off in the settings (`translation_patch`) to play with the original Japanese text.
+
+Still in Japanese, and next on the list: the how-to-play captions shown after character select, before the first stage.
 
 ## Status
 
@@ -125,6 +127,10 @@ The ones changed by this port (native renderer, the default):
   input lag, tearing possible; on waits for the display's refresh.
 - `futari_vblank_display_sync` (on by default): the game's 60 Hz vertical blank
   follows the display's refresh (see the FAQ above).
+- `translation_patch` (on by default): the English translation patch, the
+  official English of the game's Switch release for the menus, messages and
+  tutorials (see `translation/README.txt`). Off shows the original Japanese.
+  Applies at the next launch.
 - `latency_patch` (on by default): the game's swap waits for its own frame
   instead of running one frame ahead of the GPU.
 - `futari_fill_crop` (off by default): on a 16:10 or 4:3 screen, on fills the

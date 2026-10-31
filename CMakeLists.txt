@@ -72,6 +72,7 @@ set(ESPGALUDA2RECOMP_SOURCES
     src/debug_xmem_trace.cpp
     src/exit_guard.cpp
     src/rate_counter.cpp
+    src/translation.cpp
 )
 
 if(WIN32)
@@ -124,3 +125,16 @@ add_custom_target(stage_extract_xiso ALL
     VERBATIM
 )
 add_dependencies(stage_extract_xiso extract-xiso espgaluda2_recomp)
+
+# espgaluda2-recomp (2026-10-30): the English text table (src/translation.cpp) in translation/ beside the executable.
+add_custom_target(stage_translation ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:espgaluda2_recomp>/translation"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/packaging/translation/english.tsv"
+        "$<TARGET_FILE_DIR:espgaluda2_recomp>/translation/english.tsv"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/packaging/translation/README.txt"
+        "$<TARGET_FILE_DIR:espgaluda2_recomp>/translation/README.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/packaging/translation/CHANGES.txt"
+        "$<TARGET_FILE_DIR:espgaluda2_recomp>/translation/CHANGES.txt"
+    VERBATIM
+)
+add_dependencies(stage_translation espgaluda2_recomp)
