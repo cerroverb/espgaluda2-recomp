@@ -1,11 +1,11 @@
 Espgaluda II Black Label Recomp (Linux x86-64)
 
 1. Add your Xbox 360 copy of the game, either:
-   - put the .iso next to espgaluda2-recomp.sh (the first launch extracts it
+   - put the .iso next to espgaluda2_recomp (the first launch extracts it
      into game_data, then the ISO can be deleted), or
    - copy the extracted game files (default.xex, dat*.xex, res, ...) into
      the game_data folder.
-2. Run espgaluda2-recomp.sh. For Steam, add it as a non-Steam game.
+2. Run espgaluda2_recomp. For Steam, add it as a non-Steam game.
 
 Saves go to user_data. In Steam Game Mode, turn on Allow Tearing (quick menu,
 Performance) for no vsync.
@@ -34,7 +34,7 @@ map a button to F4 in Steam Input. The most useful settings:
                       possible. true: waits for the screen's refresh.
 
 The same settings work as launch options or in the file, for example:
-  ./espgaluda2-recomp.sh --renut_resolution=1440p --fullscreen=true
+  ./espgaluda2_recomp --renut_resolution=1440p --fullscreen=true
 or in espgaluda2_recomp.toml:
   renut_resolution = "1440p"
   fullscreen = true
@@ -45,7 +45,7 @@ The game uses a dedicated GPU if there is one, else the built-in one. The log
 (logs/ next to the game) lists every GPU on a line starting "GPUs:" and the one
 in use on "Renderer: Vulkan on ...". To pick another one, copy its name from
 that line exactly:
-  ./espgaluda2-recomp.sh --espgaluda2_gpu="NAME FROM THE LOG"
+  ./espgaluda2_recomp --espgaluda2_gpu="NAME FROM THE LOG"
 (or espgaluda2_gpu = "NAME" in espgaluda2_recomp.toml; restart to apply).
 The older emulated renderer (--espgaluda2_renderer=xenos) uses
 --vulkan_device=N instead (N = 0, 1, ... in the order Vulkan lists them).

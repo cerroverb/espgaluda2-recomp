@@ -77,8 +77,7 @@ jobs:
           cp -L $out/espgaluda2_recomp $out/*.so $pkg/
           cp -r $out/tools $pkg/
           cp -r $out/translation $pkg/
-          cp packaging/espgaluda2-recomp.sh packaging/README.txt LICENSE LICENSE-GPL-3.0 $pkg/
-          chmod +x $pkg/espgaluda2-recomp.sh
+          cp packaging/README.txt LICENSE LICENSE-GPL-3.0 $pkg/
           curl -sSfL -o $pkg/gamecontrollerdb.txt \
             https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/master/gamecontrollerdb.txt
           tar -C package -czf espgaluda2-recomp-linux-amd64.tar.gz espgaluda2-recomp-linux-amd64

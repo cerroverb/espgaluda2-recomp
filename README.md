@@ -107,12 +107,12 @@ Version 1.2.1 adds English how-to-play captions (shown after character select, b
 1. Download `espgaluda2-recomp-linux-amd64.tar.gz` (x86-64) or `espgaluda2-recomp-linux-arm64.tar.gz` (AArch64)
    from Releases and unpack it.
 2. Add the game, one of two ways:
-   - **ISO:** put the `.iso` next to `espgaluda2-recomp.sh`. The first launch
+   - **ISO:** put the `.iso` next to the `espgaluda2_recomp` program. The first launch
      extracts it into `game_data` (a progress window shows while it runs),
      after which the ISO can be deleted.
    - **Extracted files:** copy them into `game_data`, or make `game_data` a
      symlink to the folder.
-3. Run `espgaluda2-recomp.sh`. For Steam, add it as a non-Steam game.
+3. Run `espgaluda2_recomp`. For Steam, add it as a non-Steam game.
 
 Saves and settings are written to `user_data` beside the executable.
 

@@ -10,7 +10,7 @@ The window is the rexglue SDK's own (src/ui/overlay/settings_overlay.cpp).
 The same settings also work as launch options:
 
 ```sh
-./espgaluda2-recomp.sh --renut_resolution=1440p
+./espgaluda2_recomp --renut_resolution=1440p
 ```
 
 The names, types, defaults and descriptions below are copied by a script from the source code (`gen_settings.py`
