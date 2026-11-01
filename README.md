@@ -94,6 +94,12 @@ Version 1.2.1 adds English how-to-play captions (shown after character select, b
 - Slowdown accuracy compared to the arcade or the original 360 still needs checking by people who know the game well. I compared them against xenia-edge and my hardmodded xbox360 with my own physical copy of the game and it seems pretty accurate, but I don't have the best eye for this kind of thing, so more eyes would be great.
 - Certain things could use further testing. Two players and replays, for example, so feel free to shit up the issues section with any problems you have. 
 
+### Known issues
+
+- A short stutter when the background changes to a wallpaper that has not been shown yet in the current mode. It seems
+  to happen only while the shaders for that wallpaper are loaded for a given mode, and then it stops. I am still
+  looking to get rid of it.
+
 ## Requirements
 
 - An x86-64 or AArch64 (ARM64) Linux system with a Vulkan GPU driver (Mesa RADV/ANV/Turnip, or NVIDIA); the AArch64
