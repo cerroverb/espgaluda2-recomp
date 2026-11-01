@@ -18,8 +18,9 @@ Fork it if you want that, I'm not doing it. Linux AArch64 is out now (see Releas
 ### Is this a native port or just a glorified emulator?
 
 Almost entirely native port. The game code (`default.xex` and the seven `dat*.xex`
-modules) is recompiled ahead of time to C++, with no CPU emulation or JIT. The graphics are drawn by reNut's renderer
-from the game's Direct3D calls with Vulkan, with no GPU emulation (`espgaluda2_renderer=xenos` for the emulated GPU).
+modules) is recompiled ahead of time to C++, with no CPU emulation or JIT. The graphics are drawn from the game's
+Direct3D calls with Vulkan, through hedge-dev's plume and with shaders translated ahead of time by hedge-dev's
+XenosRecomp, with no GPU emulation (`espgaluda2_renderer=xenos` for the emulated GPU).
 The system calls are Xenia-derived reimplementations in C++.
 
 The audio is the only emulated part left. The game streams its music in XMA, the Xbox 360's audio format, to the console's XMA
@@ -56,8 +57,8 @@ late on the display stayed at 2 for the whole 2-minute run.
 ### Is this AI slop?
 
 Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
-futari-nx (the renderer port and its input-lag work), reNut (the Direct3D-level renderer), UnleashedRecomp (frame
-pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
+futari-nx (the renderer port and its input-lag work), UnleashedRecomp with hedge-dev's plume and XenosRecomp (the
+Vulkan layer, the shader translation, frame pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
 assistance was used in the porting, but with strict instructions to simply port and retool unless bespoke changes were necessary, which were made under my direct supervision, review and testing. For example, I wrote/ported most of the Linux-side input latency code myself, then ran it through Claude to improve, debug, fed it back to me to review, tweak and test, and so on.
 
 There is also a strict no machine generated media rule, so you will never see slop generated "art" or media in regards to any project I administer. 
