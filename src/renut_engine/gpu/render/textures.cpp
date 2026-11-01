@@ -9,6 +9,7 @@
 #include <rex/cvar.h>
 
 #include <algorithm>
+#include <thread>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -117,8 +118,10 @@ constexpr double kEvictMemoryShare = 0.85;
 constexpr uint64_t kLinearVerifyFrames = 30;
 constexpr uint64_t kUnlockWatchFrames = 8;
 constexpr uint32_t kDynamicChanges = 2;
-// espgaluda2-recomp: RefreshLinearLocked's stable linear textures.
-constexpr uint32_t kStableChecks = 60;
+// espgaluda2-recomp: RefreshLinearLocked's stable linear textures. 2 (was 60, 2026-11-01): after a wallpaper change,
+// 60 full hashes of each changed 9-64 MB texture at every bound frame read up to 5.5 GB in 10 s on the render thread.
+// A texture that keeps changing never matches twice in a row, so it stays on full hashes.
+constexpr uint32_t kStableChecks = 2;
 
 uint32_t NullSlot(TextureDimension dimension) {
   switch (dimension) {
@@ -370,7 +373,8 @@ struct LevelSource {
 // them together, as the game's UntileSurface does.
 void ReadLevel(const TextureFormatInfo &info, const TextureFetch &fetch, const LevelSource &src,
                uint32_t blocks_w, uint32_t blocks_h, uint32_t depth, uint8_t *dst,
-               uint32_t dst_row_pitch, uint32_t dst_slice_pitch) {
+               uint32_t dst_row_pitch, uint32_t dst_slice_pitch, uint32_t y_begin = 0,
+               uint32_t y_end = UINT32_MAX) {  // espgaluda2-recomp: rows [y_begin, y_end) (FillLevel's bands)
   const uint32_t gbpb = info.guest_block_bytes;
   const uint32_t hbpb = info.host_block_bytes;
   const uint32_t bpb_log2 = uint32_t(std::countr_zero(gbpb));
@@ -380,7 +384,7 @@ void ReadLevel(const TextureFormatInfo &info, const TextureFetch &fetch, const L
 
   std::vector<uint8_t> row(size_t(blocks_w) * gbpb);
   for (uint32_t z = 0; z < depth; ++z) {
-    for (uint32_t y = 0; y < blocks_h; ++y) {
+    for (uint32_t y = y_begin; y < std::min(blocks_h, y_end); ++y) {
       const uint32_t sy = y + src.y_blocks;
       const uint32_t sz = z + src.z_offset;
       if (fetch.Tiled()) {
@@ -425,15 +429,52 @@ std::vector<PendingFill> g_pending_fills;
 // espgaluda2-recomp (2026-10-30): the English translation patch redraws the tutorial controller diagram's labels in
 // the texture holding them (src/translation.cpp); only square 512 / 1024 texel 4-byte textures can be the ones it
 // needs, so only those are hashed.
+bool PatchesTexels(const TextureFormatInfo &info, uint32_t blocks_w, uint32_t blocks_h, uint32_t depth,
+                   uint32_t row_pitch) {
+  return info.block_size == 1 && info.host_block_bytes == 4 && depth == 1 && blocks_w == blocks_h &&
+         (blocks_w == 512 || blocks_w == 1024) && row_pitch == blocks_w * 4 &&
+         espgaluda2::translation::TextureLabelsEnabled();
+}
+
 void PatchTexels(const TextureFormatInfo &info, uint32_t blocks_w, uint32_t blocks_h, uint32_t depth, uint8_t *dst,
                  uint32_t row_pitch) {
-  if (info.block_size != 1 || info.host_block_bytes != 4 || depth != 1 || blocks_w != blocks_h ||
-      (blocks_w != 512 && blocks_w != 1024) || row_pitch != blocks_w * 4)
-    return;
-  if (!espgaluda2::translation::TextureLabelsEnabled())
+  if (!PatchesTexels(info, blocks_w, blocks_h, depth, row_pitch))
     return;
   const uint64_t hash = XXH3_64bits(dst, size_t(row_pitch) * blocks_h);
   espgaluda2::translation::EnglishTextureLabels(hash, dst, blocks_w, blocks_h, row_pitch);
+}
+
+// espgaluda2-recomp (2026-11-01): the staging buffer is upload memory, which the CPU reads back very slowly: a texture
+// the translation hashes (PatchTexels) is converted in ordinary memory and copied over in one pass (43 ms -> 3 ms for a
+// 1024x1024 one). A large level is converted by kFillThreads threads, a band of rows each: a 4096x4096 wallpaper
+// took 30-50 ms of the render thread at every wallpaper change.
+constexpr uint32_t kFillThreads = 4;
+constexpr size_t kFillThreadedBytes = size_t(8) << 20;
+
+void FillLevel(const TextureFormatInfo &info, const TextureFetch &fetch, const LevelSource &src, uint32_t blocks_w,
+               uint32_t blocks_h, uint32_t depth, uint8_t *dst, uint32_t row_pitch, uint32_t slice_pitch) {
+  const size_t bytes = size_t(slice_pitch) * depth;
+  if (PatchesTexels(info, blocks_w, blocks_h, depth, row_pitch)) {
+    static thread_local std::vector<uint8_t> scratch;
+    scratch.resize(bytes);
+    ReadLevel(info, fetch, src, blocks_w, blocks_h, depth, scratch.data(), row_pitch, slice_pitch);
+    PatchTexels(info, blocks_w, blocks_h, depth, scratch.data(), row_pitch);
+    std::memcpy(dst, scratch.data(), bytes);
+    return;
+  }
+  if (bytes < kFillThreadedBytes || depth != 1) {
+    ReadLevel(info, fetch, src, blocks_w, blocks_h, depth, dst, row_pitch, slice_pitch);
+    return;
+  }
+  const uint32_t band = (blocks_h + kFillThreads - 1) / kFillThreads;
+  std::vector<std::thread> threads;
+  for (uint32_t i = 1; i < kFillThreads; ++i)
+    threads.emplace_back([&, i] {
+      ReadLevel(info, fetch, src, blocks_w, blocks_h, depth, dst, row_pitch, slice_pitch, i * band, (i + 1) * band);
+    });
+  ReadLevel(info, fetch, src, blocks_w, blocks_h, depth, dst, row_pitch, slice_pitch, 0, band);
+  for (std::thread &t : threads)
+    t.join();
 }
 
 // Records the copies of every level into 't'. The guest data is read now, or
@@ -498,8 +539,7 @@ bool Upload(HostTexture &t, const TextureFetch &fetch, bool defer_read) {
       if (defer_read) {
         g_pending_fills.push_back({t.info, fetch, src, blocks_w, blocks_h, d, dst, row_pitch, slice_pitch});
       } else {
-        ReadLevel(t.info, fetch, src, blocks_w, blocks_h, d, dst, row_pitch, slice_pitch);
-        PatchTexels(t.info, blocks_w, blocks_h, d, dst, row_pitch);
+        FillLevel(t.info, fetch, src, blocks_w, blocks_h, d, dst, row_pitch, slice_pitch);
       }
       // Footprints are in texels, block-aligned for compressed formats. Decoded
       // blocks are plain texels, so a level smaller than a block (a small mip)
@@ -1124,9 +1164,7 @@ void NoteTextureUnlocked(u32 resource_va) {
 
 void FlushTextureFillsLocked() {
   for (const PendingFill &f : g_pending_fills) {
-    ReadLevel(f.info, f.fetch, f.src, f.blocks_w, f.blocks_h, f.depth, f.dst, f.row_pitch,
-              f.slice_pitch);
-    PatchTexels(f.info, f.blocks_w, f.blocks_h, f.depth, f.dst, f.row_pitch);
+    FillLevel(f.info, f.fetch, f.src, f.blocks_w, f.blocks_h, f.depth, f.dst, f.row_pitch, f.slice_pitch);
   }
   g_pending_fills.clear();
 }
