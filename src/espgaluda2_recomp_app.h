@@ -27,6 +27,7 @@
 #include "exit_guard.h"
 #include "futari_capture.h"
 #include "rate_counter.h"
+#include "settings_menu.h"
 #include "futari_input_script.h"
 #include "game_setup.h"
 
@@ -148,6 +149,7 @@ class Espgaluda2RecompApp : public rex::ReXApp {
         REXLOG_INFO("fullscreen {} (bind_fullscreen)", on ? "on" : "off");
       }
     });
+    espgaluda2::settings_menu::Apply();  // original code, src/settings_menu.h: the F4 window lists this game's settings
     futari::input_script::Install(runtime());
 #if FUTARI_RENUT_RENDERER
     // Renut's renderer has no GPU: the guest's vertical blank comes from a thread of its own.

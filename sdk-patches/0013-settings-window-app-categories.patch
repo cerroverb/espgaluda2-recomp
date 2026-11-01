@@ -1,0 +1,57 @@
+# espgaluda2-recomp (2026-11-01): the F4 settings window leaves out flags marked debug-only (the app marks the
+# settings that do not apply to it) and treats any "<App>/Keybinds/..." category as key bindings.
+--- a/thirdparty/rexglue-sdk/src/ui/overlay/settings_overlay.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/overlay/settings_overlay.cpp
+@@ -27,8 +27,16 @@
+ 
+ SettingsDialog::~SettingsDialog() {}
+ 
+-static bool IsHiddenFromSettings(const std::string& name) {
+-  return name == "d3d12_bindless";
++// espgaluda2-recomp (2026-11-01): a flag marked debug-only (is_debug_only, which the app sets for the settings that
++// do not apply to it) stays out of the window; it still loads from and saves to the config file.
++static bool IsHiddenFromSettings(const rex::cvar::FlagEntry& entry) {
++  return entry.is_debug_only || entry.name == "d3d12_bindless";
++}
++
++// espgaluda2-recomp: key bindings may sit under the app's own category ("<App>/Keybinds/...").
++static bool IsKeybindCategory(const std::string& cat) {
++  return cat == "Input/Keybinds" || cat.compare(0, 15, "Input/Keybinds/") == 0 || cat.ends_with("/Keybinds") ||
++         cat.find("/Keybinds/") != std::string::npos;
+ }
+ 
+ static const char* LifecycleBadge(rex::cvar::Lifecycle lc) {
+@@ -164,6 +172,8 @@
+   // Collect sorted unique category paths.
+   std::set<std::string> category_set;
+   for (auto& entry : registry) {
++    if (IsHiddenFromSettings(entry))
++      continue;
+     category_set.insert(entry.category);
+   }
+ 
+@@ -287,13 +297,12 @@
+ 
+   // Helper: check if a category is a keybind category.
+   auto is_keybind_category = [](const std::string& cat) -> bool {
+-    return cat == "Input/Keybinds" ||
+-           (cat.size() > 15 && cat.compare(0, 15, "Input/Keybinds/") == 0);
++    return IsKeybindCategory(cat);
+   };
+ 
+   ImGui::BeginChild("##cvars", ImVec2(0, -30.0f), false);
+   for (auto& entry : registry) {
+-    if (IsHiddenFromSettings(entry.name)) {
++    if (IsHiddenFromSettings(entry)) {
+       continue;
+     }
+     // Filter by category (unless searching).
+@@ -333,7 +342,7 @@
+     if (is_keybind_category(entry.category)) {
+       // Grey out controller keybinds when MnK mode is disabled
+       bool mnk_disabled =
+-          (entry.category == "Input/Keybinds/Controller" && !REXCVAR_QUERY(bool, mnk_mode));
++          (entry.category.ends_with("Keybinds/Controller") && !REXCVAR_QUERY(bool, mnk_mode));
+       if (mnk_disabled)
+         ImGui::BeginDisabled();
+ 

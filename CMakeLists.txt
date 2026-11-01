@@ -81,6 +81,7 @@ set(ESPGALUDA2RECOMP_SOURCES
     src/debug_xmem_trace.cpp
     src/exit_guard.cpp
     src/rate_counter.cpp
+    src/settings_menu.cpp
     src/translation.cpp
 )
 
