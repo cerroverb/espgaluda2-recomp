@@ -1,0 +1,15 @@
+# espgaluda2-recomp (2026-11-01): XUserReadStats answers X_ONLINE_E_LOGON_NOT_LOGGED_ON, as xenia-canary's xgi_app.cc does,
+# so Espgaluda II's leaderboard read after a Score Attack game fails cleanly instead of waiting forever.
+--- a/thirdparty/rexglue-sdk/src/kernel/xam/apps/xgi_app.cpp
++++ b/thirdparty/rexglue-sdk/src/kernel/xam/apps/xgi_app.cpp
+@@ -297,7 +297,9 @@
+       REXKRNL_DEBUG("XUserReadStats({}, {}, {:08X}, {}, {:08X}, {}, {:08X})", title_id, xuids_count,
+                     xuids_ptr, specs_count, specs_ptr, results_size, results_ptr);
+ 
+-      return X_E_SUCCESS;
++      // espgaluda2-recomp (2026-11-01): as xenia-canary src/xenia/kernel/xam/apps/xgi_app.cc (canary_experimental)
++      // answers it. Success without results left Espgaluda II's Score Attack waiting forever after game over.
++      return 0x80151802;  // X_ONLINE_E_LOGON_NOT_LOGGED_ON
+     }
+     case 0x000B0025: {
+       assert_true(!buffer_length || buffer_length == 20);

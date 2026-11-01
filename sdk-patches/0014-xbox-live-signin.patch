@@ -1,0 +1,13 @@
+# espgaluda2-recomp (2026-11-01): the profile reports a sign-in to Xbox LIVE (2), which Espgaluda II needs to open Score
+# Attack. The session and stats calls (xgi_app.cpp) are stubs that succeed; nothing goes online.
+--- a/thirdparty/rexglue-sdk/include/rex/system/xam/user_profile.h
++++ b/thirdparty/rexglue-sdk/include/rex/system/xam/user_profile.h
+@@ -218,7 +218,7 @@
+ 
+   uint64_t xuid() const { return xuid_; }
+   std::string name() const { return name_; }
+-  uint32_t signin_state() const { return 1; }
++  uint32_t signin_state() const { return 2; }  // espgaluda2-recomp: signed in to Xbox LIVE (Score Attack needs it)
+   uint32_t type() const { return 1 | 2; /* local | online profile? */ }
+ 
+   void set_kernel_state(KernelState* ks) { kernel_state_ = ks; }
