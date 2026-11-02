@@ -31,7 +31,7 @@ decoder chip, and the SDK emulates that chip (FFmpeg does the decoding).
 Measured on a Steam Deck OLED, with both running the same scene under the same conditions: Black Label Novice, stage 1
 and its boss, the same controller route and saves, fullscreen 1280x720, vsync off, 50-second windows of gameplay.
 Xenia Edge 1574493 (the latest when measured, 2026-10-30) runs through Xwayland, its only display path on Linux;
-this port runs as a native Wayland window. Lower is better.
+this port runs as a native Wayland window. 
 
 ```mermaid
 xychart-beta
