@@ -8,6 +8,13 @@ set -u
 build=$1; prefix=$(realpath -m "$2"); total=$3; shots=$4; shift 4
 mkdir -p "$(dirname "$prefix")"
 cd "$build" || exit 1
+# Optional: refuse to start unless game_data matches a SHA-256 manifest and its entry list
+# (ESPGALUDA2_VERIFY_MANIFEST=<file.sha256>, ESPGALUDA2_VERIFY_TREE=<file.tree>).
+if [ -n "${ESPGALUDA2_VERIFY_MANIFEST:-}" ]; then
+  ( cd game_data/ && sha256sum --quiet --check "$ESPGALUDA2_VERIFY_MANIFEST" &&
+    find . -mindepth 1 -printf '%y %P\n' | LC_ALL=C sort | diff -q - "$ESPGALUDA2_VERIFY_TREE" > /dev/null ) ||
+    { echo "game_data does not match $ESPGALUDA2_VERIFY_MANIFEST: not starting" >&2; exit 1; }
+fi
 pactl list short sinks | grep -q espgaluda_sink || pactl load-module module-null-sink sink_name=espgaluda_sink >/dev/null
 stop_game() {
   # SIGTERM first: a SIGKILLed game leaves its guest memory file (/dev/shm/xenia_memory_*, ~4.8 GB sparse) behind,
