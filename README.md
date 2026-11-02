@@ -28,10 +28,10 @@ decoder chip, and the SDK emulates that chip (FFmpeg does the decoding).
 
 #### Compared with Xenia Edge
 
-Measured on a Steam Deck OLED, with both running the same scene under the same conditions: Black Label Novice, stage 1
+Measured on a Steam Deck OLED, with both running the same scene under the same conditions: Black Label, stage 1
 and its boss, the same controller route and saves, fullscreen 1280x720, vsync off, 50-second windows of gameplay.
 Xenia Edge 1574493 (the latest when measured, 2026-10-30) runs through Xwayland, its only display path on Linux;
-this port runs as a native Wayland window. 
+this port runs as a native Wayland window. The green bar represents Xenia Edge's usage.
 
 ```mermaid
 xychart-beta
@@ -52,7 +52,9 @@ xychart-beta
 Both held 60 frames a second. Xenia Edge had 1 frame interval over 20 ms in the run and this port 62-65, all of them in
 one 2.2-second stretch at the boss, where the game's own work alternates by about 4 ms a frame. This port shows each
 frame as soon as the game finishes it, while Xenia Edge paces frames on a thread of its own. Frames shown a refresh
-late on the display stayed at 2 for the whole 2-minute run.
+late on the display stayed at 2 for the whole 2-minute run. 
+
+To be very clear, Xenia edge is an amazing project and this project would not exist without it. 
 
 ### Is this AI slop?
 
