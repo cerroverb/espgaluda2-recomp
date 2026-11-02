@@ -28,33 +28,26 @@ decoder chip, and the SDK emulates that chip (FFmpeg does the decoding).
 
 #### Compared with Xenia Edge
 
-Measured on a Steam Deck OLED, with both running the same scene under the same conditions: Black Label, stage 1
-and its boss, the same controller route and saves, fullscreen 1280x720, vsync off, 50-second windows of gameplay.
-Xenia Edge 1574493 (the latest when measured, 2026-10-30) runs through Xwayland, its only display path on Linux;
-this port runs as a native Wayland window. The green bar represents Xenia Edge's usage.
+Measured on a Steam Deck OLED, with both running the same scene under the same conditions: Black Label (standard
+mode), stage 1, the same controller route and saves, fullscreen 1280x720, vsync off, 50-second windows of gameplay,
+two runs each, both as native Wayland windows. Xenia Edge 1574493. For a cautious comparison, the chart sets this
+port's higher run against Xenia Edge's lower run. Lower is better.
 
 ```mermaid
 xychart-beta
     title "This port's use, as % of Xenia Edge's (Xenia Edge = 100)"
     x-axis ["CPU", "GPU busy", "Power", "Memory"]
     y-axis "% of Xenia Edge" 0 --> 100
-    bar [37, 30, 71, 78]
+    bar [36, 36, 74, 78]
     line [100, 100, 100, 100]
 ```
 
-| | This port | Xenia Edge |
+| | This port (2 runs) | Xenia Edge (2 runs) |
 | --- | --- | --- |
-| CPU (% of one core) | 56 % | 153 % |
-| GPU busy | 13-15 % | 46 % |
-| Power (whole chip) | 7.1 W | 10.0 W |
-| Memory (resident) | 863 MB | 1109 MB |
-
-Both held 60 frames a second. Xenia Edge had 1 frame interval over 20 ms in the run and this port 62-65, all of them in
-one 2.2-second stretch at the boss, where the game's own work alternates by about 4 ms a frame. This port shows each
-frame as soon as the game finishes it, while Xenia Edge paces frames on a thread of its own. Frames shown a refresh
-late on the display stayed at 2 for the whole 2-minute run. 
-
-To be very clear, Xenia edge is an amazing project and this project would not exist without it. 
+| CPU (% of one core) | 52 %, 51 % | 150 %, 144 % |
+| GPU busy | 16 %, 16 % | 67 %, 44 % |
+| Power (whole chip) | 7.2 W, 6.9 W | 12.1 W, 9.7 W |
+| Memory (resident) | 858 MB, 858 MB | 1099 MB, 1121 MB |
 
 ### Is this AI slop?
 
