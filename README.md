@@ -125,9 +125,9 @@ Version 1.2.1 adds English how-to-play captions (shown after character select, b
 
 ### Known issues
 
-- A short stutter when the background changes to a wallpaper that has not been shown yet in the current mode. It seems
-  to happen only while the shaders for that wallpaper are loaded for a given mode, and then it stops. I am still
-  looking to get rid of it.
+- A short stutter when the background changes to a new wallpaper. It came from preparing the new wallpaper image, not
+  from shaders, and v1.3.0 makes that step several times faster; a slight hitch can remain on some machines. I am
+  still looking to get rid of it completely.
 
 ## Requirements
 
