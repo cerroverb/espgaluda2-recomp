@@ -91,7 +91,7 @@ vsync off the game's vertical blank stayed locked to every fourth refresh at 60 
 
 ### Will audio become native?
 
-No existing project shows a native replacement yet that I could find, but let me know if one exists.
+No existing project shows a native replacement yet that I could find, but let me know if one exists. I would not feel comfortable trying to crack this one myself, and I'm not about to have an LLM hallucinate something together from scratch, which goes against how I use LLM tools. 
 
 ### Can this help with other CAVE games?
 
