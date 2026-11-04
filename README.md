@@ -28,6 +28,8 @@ decoder chip, and the SDK emulates that chip (FFmpeg does the decoding).
 
 #### Compared with Xenia Edge
 
+Before anything, Xenia Edge is an AMAZING project and this project would not exist without it. Big ups.
+
 Measured on a Steam Deck OLED, with both running the same scene under the same conditions: Black Label (standard
 mode), stage 1, the same controller route and saves, fullscreen 1280x720, vsync off, 50-second windows of gameplay,
 two runs each, both as native Wayland windows. Xenia Edge 1574493. For a cautious comparison, the chart sets this
