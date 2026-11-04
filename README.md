@@ -11,9 +11,14 @@ No game data is included. You need your own dump of the game.
 
 ## FAQ
 
-### Windows/macOS?
+### Is this AI slop?
 
-Fork it if you want that, I'm not doing it. Linux AArch64 is out now (see releases) BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll maybe consider a Windows version in the future, as for the moment I don't run Windows on anything anymore, and I don’t want to ship something I can’t verify.
+Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
+futari-nx (the renderer port and its input-lag work), UnleashedRecomp with hedge-dev's plume and XenosRecomp (the
+Vulkan layer, the shader translation, frame pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
+assistance was used in the porting, but with strict instructions to simply port and retool unless bespoke changes were necessary, which were made under my direct supervision, review and testing. For example, I wrote/ported most of the Linux-side input latency code myself, then ran it through Claude to improve, debug, fed it back to me to review, tweak and test, and so on.
+
+There is also a strict no machine generated media rule, so you will never see slop generated "art" or media in regards to any project I administer. 
 
 ### Is this a native port or just a glorified emulator?
 
@@ -26,7 +31,11 @@ The system calls are Xenia-derived reimplementations in C++.
 The audio is the only emulated part left. The game streams its music in XMA, the Xbox 360's audio format, to the console's XMA
 decoder chip, and the SDK emulates that chip (FFmpeg does the decoding).
 
-#### Compared with Xenia Edge
+### Windows/macOS?
+
+Fork it if you want that, I'm not doing it. Linux AArch64 is out now (see releases) BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll maybe consider a Windows version in the future, as for the moment I don't run Windows on anything anymore, and I don’t want to ship something I can’t verify.
+
+#### How does it perform compared to Xenia Edge?
 
 Before anything, Xenia Edge is an AMAZING project and this project would not exist without it. Big ups.
 
@@ -50,15 +59,6 @@ xychart-beta
 | GPU busy | 16 %, 16 % | 67 %, 44 % |
 | Power (whole chip) | 7.2 W, 6.9 W | 12.1 W, 9.7 W |
 | Memory (resident) | 858 MB, 858 MB | 1099 MB, 1121 MB |
-
-### Is this AI slop?
-
-Mostly no. The vast majority of this project is code ported and retooled from other recompilation projects, such as
-futari-nx (the renderer port and its input-lag work), UnleashedRecomp with hedge-dev's plume and XenosRecomp (the
-Vulkan layer, the shader translation, frame pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
-assistance was used in the porting, but with strict instructions to simply port and retool unless bespoke changes were necessary, which were made under my direct supervision, review and testing. For example, I wrote/ported most of the Linux-side input latency code myself, then ran it through Claude to improve, debug, fed it back to me to review, tweak and test, and so on.
-
-There is also a strict no machine generated media rule, so you will never see slop generated "art" or media in regards to any project I administer. 
 
 ### Does this port reduce input lag?
 
