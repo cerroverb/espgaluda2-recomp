@@ -13,7 +13,7 @@ No game data is included. You need your own dump of the game.
 
 ### Windows/macOS?
 
-Fork it if you want that, I'm not doing it. Linux AArch64 is out now (see releases) BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll consider a Windows version BIG MAYBE THOUGH.
+Fork it if you want that, I'm not doing it. Linux AArch64 is out now (see releases) BSD (NetBSD) though maybe. Or if enough shmuppers ask I'll maybe consider a Windows version in the future, as for the moment I don't run Windows on anything anymore, and I don’t want to ship something I can’t verify.
 
 ### Is this a native port or just a glorified emulator?
 
