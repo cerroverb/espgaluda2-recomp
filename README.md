@@ -18,7 +18,7 @@ futari-nx (the renderer port and its input-lag work), UnleashedRecomp with hedge
 Vulkan layer, the shader translation, frame pacing, GPU choice) and the ReXGlue SDK as bundled with SDOJ-Recomp, made to work for Espgaluda II on Linux. LLM
 assistance was used in the porting, but with strict instructions to simply port and retool unless bespoke changes were necessary, which were made under my direct supervision, review and testing. For example, I wrote/ported most of the Linux-side input latency code myself, then ran it through the LLM to improve, debug, fed it back to me to review, tweak and test, and so on.
 
-There is also a strict no machine generated media rule, so you will never see slop generated "art" or media in regards to any project I administer. 
+There is also a strict no machine generated media rule, so you will never see slopgen visual media in regards to any project I administer. 
 
 ### Is this a native port or just a glorified emulator?
 
