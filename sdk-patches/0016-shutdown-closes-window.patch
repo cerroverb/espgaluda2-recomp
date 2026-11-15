@@ -1,0 +1,19 @@
+# Backport to the SDOJ-bundled ReXGlue 0.8.0 of one step of upstream rexglue-sdk 71851734 (github.com/rexglue/rexglue-sdk,
+# BSD-3-Clause, TitleApp::Stop): a shutdown asked for by the program (RequestExit) also closes the window, after
+# TerminateTitle. The window then sends OnClosing to its listeners, as on the close button. Without it the MnK input
+# driver kept the window pointer, OnDestroy freed the window first, and the driver's destructor removed its listener
+# from the freed window ("free(): double free detected in tcache 2" after the main menu's EXIT).
+diff --git a/thirdparty/rexglue-sdk/src/ui/rex_app.cpp b/thirdparty/rexglue-sdk/src/ui/rex_app.cpp
+--- a/thirdparty/rexglue-sdk/src/ui/rex_app.cpp
++++ b/thirdparty/rexglue-sdk/src/ui/rex_app.cpp
+@@ -443,6 +443,10 @@
+   if (runtime_ && runtime_->kernel_state()) {
+     runtime_->kernel_state()->TerminateTitle();
+   }
++  // espgaluda2-recomp (sdk-patches/0016): from upstream rexglue-sdk 71851734 (TitleApp::Stop).
++  if (window_) {
++    window_->RequestClose();
++  }
+   app_context().QuitFromUIThread();
+ }
+ 
