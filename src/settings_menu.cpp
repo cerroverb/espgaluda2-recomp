@@ -37,6 +37,7 @@ const std::unordered_map<std::string_view, std::string_view> kShown = {
     {"futari_renut_double_buffer", "Espgaluda2/Latency"},
     // Game
     {"translation_patch", "Espgaluda2/Game"},
+    {"exit_to_desktop", "Espgaluda2/Game"},
     // Audio
     {"audio_mute", "Espgaluda2/Audio"},
     {"audio_maxqframes", "Espgaluda2/Audio"},

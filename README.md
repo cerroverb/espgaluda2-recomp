@@ -165,6 +165,8 @@ The ones changed by this port (native renderer, the default):
   official English of the game's Switch release for the menus, messages and
   tutorials (see `translation/README.txt`). Off shows the original Japanese.
   Applies at the next launch.
+- `exit_to_desktop` (on by default): EXIT in the main menu quits the game.
+  Off returns to the title screen, as on the Xbox 360.
 - `latency_patch` (on by default): the game's swap waits for its own frame
   instead of running one frame ahead of the GPU.
 - `futari_fill_crop` (off by default): on a 16:10 or 4:3 screen, on fills the

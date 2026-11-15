@@ -26,6 +26,7 @@
 
 #include "exit_guard.h"
 #include "futari_capture.h"
+#include "main_menu_exit.h"
 #include "rate_counter.h"
 #include "settings_menu.h"
 #include "futari_input_script.h"
@@ -113,6 +114,7 @@ class Espgaluda2RecompApp : public rex::ReXApp {
   // futari-nx futari_app.h OnPreSetup: with Renut's renderer, no SDK graphics system and no GPU plugin (the SDK's
   // detached mode, sdk-patches/0002).
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    espgaluda2::main_menu_exit::SetApp(*this);  // src/main_menu_exit.h
 #if FUTARI_RENUT_RENDERER
     if (banjo::renut_gpu::Active()) {
       renut::gpu::ConfigureRuntime(config);

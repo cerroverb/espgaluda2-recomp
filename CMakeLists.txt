@@ -80,6 +80,7 @@ set(ESPGALUDA2RECOMP_SOURCES
     src/futari_input_script.cpp
     src/debug_xmem_trace.cpp
     src/exit_guard.cpp
+    src/main_menu_exit.cpp
     src/rate_counter.cpp
     src/settings_menu.cpp
     src/translation.cpp
